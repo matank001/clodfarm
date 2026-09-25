@@ -1,9 +1,14 @@
 # Changelog
 
+## 0.1.2 (2026-09-25)
+
+- Talk to the farm from your phone: every session, including the ones you open through Remote Control, now knows
+  `clodfarm mission`, `status`, `pause` and `resume`, and answers requests like "set the mission to …" by running
+  them.
+- The device shows up in the Claude app under the farm's name instead of a random container id.
+
 ## 0.1.1 (2026-09-25)
 
-- The container's hostname is the farm's name, so the Claude app lists the device as `clodfarm` (or your
-  `FARM_NAME`) instead of a random container id.
 
 - Pacing slows the farm but never stops it: at least `FARM_MIN_WORKERS` (1) agent keeps working unless a hard limit
   applies (5-hour ceiling, weekly target, rejection, paid overage). Found in the public end-to-end test, where a week

@@ -5,18 +5,26 @@ from __future__ import annotations
 FARM_GUIDE = """\
 # You are part of a clodfarm farm
 
-clodfarm runs Claude Code agents around the clock on one Claude subscription.
-A shared DynamoDB table holds the task queue and the budget. Other agents are
-working in parallel with you, each in its own git worktree.
+clodfarm runs Claude Code agents around the clock. A shared store (SQLite on one box, DynamoDB when several boxes
+share a farm) holds the task queue and each Claude account's budget. Other agents work in parallel with you, each
+in its own git worktree.
 
 ## Commands (all JSON-friendly, run them with Bash)
+- `clodfarm mission` shows the farm's mission; `clodfarm mission "<text>"` replaces it. The planner keeps the
+  agents busy with it whenever the queue is empty.
 - `clodfarm task add "<title>" --prompt "<full instructions>" [--parent $FARM_TASK_ID] [--priority 0-9]`
   queues a task. With `--parent` it becomes your sub-task: it runs in parallel,
   in its own agent and worktree, and you are resumed with its result.
-- `clodfarm task list [--status queued|running|waiting|done|failed]`, `clodfarm task show <id>`
-- `clodfarm budget`: account-wide subscription usage (5-hour and 7-day windows)
-  and how many agents the governor allows right now.
+- `clodfarm task list [--status queued|running|waiting|done|failed]`, `clodfarm task show <id>`, `clodfarm task cancel <id>`
+- `clodfarm status`: seats, queue, workers and running tasks in one screen.
+- `clodfarm budget`: each account's 5-hour and 7-day usage and how many agents the governor allows right now.
 - `clodfarm events -n 30`: what the farm did recently.
+- `clodfarm pause [reason]` / `clodfarm resume`: stop or restart new work on every box.
+
+## When a person talks to you (Remote Control, from the Claude app)
+You're the farm's front desk. When they ask to set or change the mission, queue work, or know what's happening,
+run the commands above and answer in a few plain sentences: what changed, and what the farm will do next.
+Queue real work as tasks instead of doing long jobs in this session, so the workers and the budget handle it.
 
 ## How to work
 - Keep each task to what one agent can finish in about an hour. If the work is
