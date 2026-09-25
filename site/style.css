@@ -22,7 +22,7 @@ body { margin: 0; font: 400 1rem/1.6 var(--sans); background: #070B1C; }
   --scene-w: max(100vw, calc(100svh * 1.9));
   height: 100svh; min-height: 560px; display: flex; flex-direction: column;
   background:
-    linear-gradient(to top, rgba(3, 6, 16, .97) 0, rgba(3, 6, 16, .9) 17%, rgba(3, 6, 16, .45) 25%, rgba(3, 6, 16, 0) 34%),
+    linear-gradient(to top, #070B1C 0, rgba(7, 11, 28, 0) 12%),
     url("/scene.svg") center bottom / var(--scene-w) auto no-repeat,
     radial-gradient(1.2px 1.2px at 12% 14%, #fff9 50%, transparent 51%),
     radial-gradient(1px 1px at 34% 8%, #fff8 50%, transparent 51%),
@@ -97,21 +97,6 @@ h1 { font-size: clamp(2rem, min(4.2vw, 7.2vh), 3.6rem); line-height: 1.04; font-
 .note { color: var(--mist); font-size: .88rem; margin: min(1.1rem, 2vh) 0 0; opacity: .85; }
 
 
-/* ---------- four facts, one row ---------- */
-/* the four facts sit on the field, over a dark fade */
-.facts {
-  margin-top: auto; margin-bottom: clamp(1.2rem, 3.5vh, 2.4rem);
-  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 0;
-}
-.facts > div { padding: 0 1.5rem; border-left: 1px solid var(--line); }
-.facts > div:first-child { padding-left: 0; border-left: 0; }
-.facts h2 { font-size: 1rem; font-weight: 600; letter-spacing: -.01em; margin: 0 0 .35rem; display: flex; align-items: center; gap: .55rem; }
-.facts h2::before { content: ""; width: .5rem; height: .5rem; border-radius: 50%; background: var(--sprout); box-shadow: 0 0 10px var(--sprout); flex: none; }
-.facts > div:nth-child(2) h2::before { background: var(--moon); box-shadow: 0 0 10px var(--moon); }
-.facts > div:nth-child(4) h2::before { background: var(--ember); box-shadow: 0 0 10px var(--ember); }
-.facts p { margin: 0; color: var(--mist); font-size: .92rem; line-height: 1.5; }
-
-.install { background: rgba(3, 6, 22, .75); }
 /* ---------- questions, below the first screen ---------- */
 .faq { max-width: 80rem; margin: 0 auto; padding: clamp(2.5rem, 6vw, 4.5rem) var(--gutter) 1rem; }
 .faq h2 { font-size: clamp(1.5rem, 2.6vw, 2rem); font-weight: 700; letter-spacing: -.035em; margin: 0 0 1.2rem; }
@@ -126,15 +111,11 @@ h1 { font-size: clamp(2rem, min(4.2vw, 7.2vh), 3.6rem); line-height: 1.04; font-
 .foot { padding: 1.2rem var(--gutter) 1.6rem; max-width: 80rem; width: 100%; margin: 0 auto; }
 .foot p { margin: 0; color: var(--mist); font-size: .8rem; opacity: .7; }
 
-@media (max-height: 700px) and (min-width: 961px) { .note { display: none; } .facts p { font-size: .85rem; } }
+@media (max-height: 700px) and (min-width: 961px) { .note { display: none; } }
 @media (max-width: 960px) {
   .stage { height: auto; min-height: 100svh; }
   .stage { --scene-w: 900px; }
-  .facts { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 1.4rem; }
-  .facts > div:nth-child(3) { padding-left: 0; border-left: 0; }
 }
 @media (max-width: 560px) {
-  .facts { grid-template-columns: 1fr; }
-  .facts > div { padding-left: 0; border-left: 0; }
 }
 @media (prefers-reduced-motion: reduce) { * { transition: none !important; animation: none !important; } }
