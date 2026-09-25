@@ -21,6 +21,8 @@ def _bool(name: str, default: bool) -> bool:
 @dataclass
 class Config:
     name: str  # farm name: shown in the Claude app and in the logs
+    store: str  # sqlite (one box, the default) | dynamodb (several boxes / accounts)
+    db_path: str  # the SQLite file
     table: str
     region: str
     endpoint: str | None  # DynamoDB Local URL, or None for real DynamoDB
@@ -69,9 +71,19 @@ class Config:
         return [os.path.join(self.repo_dir, "MISSION.md"), os.path.join(self.workspace, "MISSION.md")]
 
 
+def _store_kind() -> str:
+    kind = _env("FARM_STORE", "").lower()
+    if kind in ("sqlite", "dynamodb"):
+        return kind
+    # joining a DynamoDB farm: an endpoint (DynamoDB Local) or an explicit table name implies it
+    return "dynamodb" if os.environ.get("FARM_DYNAMODB_ENDPOINT") or os.environ.get("FARM_TABLE") else "sqlite"
+
+
 def load() -> Config:
     return Config(
         name=_env("FARM_NAME", "claude-farm"),
+        store=_store_kind(),
+        db_path=_env("FARM_DB", os.path.join(_env("FARM_WORKSPACE", "/workspace"), ".farm", "farm.db")),
         table=_env("FARM_TABLE", "claude-farm"),
         region=_env("AWS_REGION", _env("AWS_DEFAULT_REGION", "us-east-1")),
         endpoint=os.environ.get("FARM_DYNAMODB_ENDPOINT") or None,

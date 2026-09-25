@@ -165,8 +165,8 @@ Resources:
             fi
             cat > /opt/claude-farm/.env <<EOF
             AWS_REGION=${AWS::Region}
+            FARM_STORE=dynamodb
             FARM_TABLE=${Tbl}
-            FARM_DYNAMODB_ENDPOINT=
             FARM_NAME=${AWS::StackName}
             FARM_MODEL=${Model}
             FARM_MAX_WORKERS=${MaxWorkers}

@@ -12,6 +12,8 @@ First public release.
 - A planner that keeps the agents busy from `MISSION.md`.
 - A git worktree per task. Sub-tasks branch from their parent, and top-level tasks rebase and fast-forward into main.
 - Docker image, docker compose with DynamoDB Local, and an AWS CloudFormation deploy with no inbound ports.
+- **Zero-setup single box:** a built-in SQLite store (no database to run), a one-line installer, an optional `.env`,
+  and `claude-farm mission`. DynamoDB only when one farm spans several boxes (`FARM_STORE=dynamodb`).
 - **Several Claude accounts in one farm:** a per-seat budget, slots and spend, a shared queue, task branches shared
   through origin, and session affinity for resumed parents. `claude-farm budget` and `status` show every seat.
 - Quality gate (`FARM_VERIFY_CMD`): check the rebased branch before it lands; resume the agent to fix failures.

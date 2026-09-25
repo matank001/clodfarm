@@ -6,6 +6,7 @@
     claude-farm budget [--refresh]       subscription usage and what the governor allows
     claude-farm task add TITLE [--prompt TEXT | --prompt-file F | -] [--parent ID] [--priority 0-9]
     claude-farm task list [--status S] | show ID | cancel ID | retry ID
+    claude-farm mission [TEXT | -f FILE]  show or set MISSION.md (the planner keeps agents busy with it)
     claude-farm events [-n 30] [-f]      the farm's event log
     claude-farm pause [REASON] | resume  stop or restart new work on every farm sharing the table
     claude-farm init                     create the DynamoDB table
@@ -173,7 +174,7 @@ def cmd_status(cfg, a):
         _out({"farm": cfg.farm_id, "paused": ctl, "counts": counts, "workers": workers, "seats": _seats_json(rows)},
              True, "")
         return 0
-    print(f"claude-farm {__version__}  farm {cfg.farm_id}  table {cfg.table}"
+    print(f"claude-farm {__version__}  box {cfg.farm_id}  store {_store(cfg).describe()}"
           + (f"  PAUSED: {ctl.get('reason') or 'by hand'}" if ctl.get("paused") else ""))
     print(_budget_text(rows))
     rc = [e for e in store.events(now() - 7 * 86400, 500) if e["type"] == "rc.connected"]
@@ -276,6 +277,24 @@ def cmd_events(cfg, a):
     return 0
 
 
+def cmd_mission(cfg, a):
+    from . import gitops
+    text = sys.stdin.read() if a.text == ["-"] else " ".join(a.text)
+    if a.file:
+        text = open(a.file).read()
+    if not text.strip():
+        cur = next((p for p in cfg.mission_paths if os.path.isfile(p)), None)
+        print(open(cur).read().rstrip() if cur else "No mission yet. Set one: claude-farm mission \"Build ...\"")
+        return 0 if cur else 1
+    if not os.path.isdir(cfg.repo_dir):
+        print(f"The workspace repo {cfg.repo_dir} doesn't exist yet: start the farm first (claude-farm run).", file=sys.stderr)
+        return 1
+    path = gitops.write_mission(cfg.repo_dir, text)
+    _store(cfg).event("mission.set", text.strip().splitlines()[0][:200])
+    print(f"mission saved to {path}. The planner picks it up when the queue is empty.")
+    return 0
+
+
 def cmd_pause(cfg, a):
     _store(cfg).set_paused(True, " ".join(a.reason) or "paused by hand")
     print("paused: running agents finish their current run, no new ones start")
@@ -289,8 +308,9 @@ def cmd_resume(cfg, a):
 
 
 def cmd_init(cfg, a):
-    created = _store(cfg).ensure_table()
-    print(f"table {cfg.table}: {'created' if created else 'already exists'}")
+    store = _store(cfg)
+    created = store.ensure_table()
+    print(f"{store.describe()}: {'created' if created else 'already exists'}")
     return 0
 
 
@@ -310,10 +330,9 @@ def cmd_doctor(cfg, a):
     check("subscription login", st.get("loggedIn"), st.get("via") or st.get("error") or "run `claude-farm login`")
     try:
         store = _store(cfg)
-        store.client.describe_table(TableName=cfg.table)
-        check("DynamoDB table", True, f"{cfg.table} ({cfg.endpoint or cfg.region})")
+        check("farm store", store.ready(), store.describe() + ("" if store.ready() else " (start the farm or run `claude-farm init`)"))
     except Exception as e:  # noqa: BLE001
-        check("DynamoDB table", False, f"{cfg.table}: {str(e)[:160]} (run `claude-farm init`)")
+        check("farm store", False, f"{cfg.store}: {str(e)[:160]}")
     check("git", shutil.which("git"))
     check("workspace", os.path.isdir(cfg.workspace), cfg.workspace)
     mission = next((p for p in cfg.mission_paths if os.path.isfile(p)), None)
@@ -364,6 +383,9 @@ def main(argv=None):
     e = add("events", cmd_events, "the event log")
     e.add_argument("-n", type=int, default=30)
     e.add_argument("-f", "--follow", action="store_true")
+    m = add("mission", cmd_mission, "show or set MISSION.md, what the planner keeps the agents busy with")
+    m.add_argument("text", nargs="*", help="the mission ('-' reads stdin); empty shows the current one")
+    m.add_argument("-f", "--file", help="read the mission from a file")
     add("pause", cmd_pause, "pause new work everywhere").add_argument("reason", nargs="*")
     add("resume", cmd_resume, "resume work")
     add("init", cmd_init, "create the DynamoDB table")

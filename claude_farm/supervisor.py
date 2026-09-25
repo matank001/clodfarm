@@ -48,6 +48,9 @@ class Farm:
         self.wait_for_auth()
         self.ensure_table()
         gitops.ensure_repo(self.cfg.repo_dir, self.cfg.repo_url)
+        if os.environ.get("FARM_MISSION") and not any(os.path.isfile(p) for p in self.cfg.mission_paths):
+            gitops.write_mission(self.cfg.repo_dir, os.environ["FARM_MISSION"])
+            self.store.event("mission.set", "MISSION.md written from FARM_MISSION")
         if self.cfg.manage_claude_config:
             if self.cfg.remote_control:
                 accept_remote_control()

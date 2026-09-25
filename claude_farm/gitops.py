@@ -75,6 +75,19 @@ def ensure_excludes(repo: str):
             f.write(("\n" if cur and not cur.endswith("\n") else "") + _EXCLUDE_MARK + "\n" + DEFAULT_EXCLUDES)
 
 
+def write_mission(repo: str, text: str) -> str:
+    """Write MISSION.md at the repo root and commit it on main (so every worktree sees it)."""
+    path = os.path.join(repo, "MISSION.md")
+    with open(path, "w") as f:
+        f.write(text.rstrip() + "\n")
+    if is_repo(repo):
+        git(repo, "add", "MISSION.md")
+        if git(repo, "status", "--porcelain", "MISSION.md", check=False):
+            git(repo, "-c", "user.name=claude-farm", "-c", "user.email=claude-farm@localhost", "commit", "-qm",
+                "mission: update MISSION.md", check=False)
+    return path
+
+
 def fetch_branch(repo: str, branch: str) -> bool:
     """Get a task branch another box pushed (several boxes share work through origin). Never fails the caller."""
     if not has_origin(repo):

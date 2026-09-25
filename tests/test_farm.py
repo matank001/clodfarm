@@ -23,8 +23,7 @@ def start_farm():
 
 def _table(farm):
     try:
-        farm.store.client.describe_table(TableName=farm.cfg.table)
-        return True
+        return farm.store.ready()
     except Exception:
         return False
 
@@ -246,5 +245,20 @@ def test_remote_control_prompt_is_pre_answered(env):
     try:
         wait_for(lambda: [c for c in calls(env) if c["cmd"] == "remote-control"])
         assert json.load(open(env / "claude-home" / ".claude.json"))["remoteDialogSeen"] is True
+    finally:
+        stop_farm(farm, t)
+
+
+def test_mission_from_env_and_from_the_cli(env, monkeypatch):
+    monkeypatch.setenv("FARM_MISSION", "Write one file.")
+    farm, t = start_farm()
+    try:
+        mission = env / "workspace" / "repo" / "MISSION.md"
+        wait_for(lambda: mission.exists())
+        assert mission.read_text().strip() == "Write one file."
+        cli("mission", "Write two files.")
+        assert mission.read_text().strip() == "Write two files."
+        assert "MISSION.md" in repo_files(env), "committed, so every worktree sees it"
+        assert "Write two files." in cli("mission").stdout
     finally:
         stop_farm(farm, t)

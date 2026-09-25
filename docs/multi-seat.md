@@ -1,6 +1,7 @@
 # One farm, several boxes, several Claude accounts
 
-A **farm** is one DynamoDB table. Every box (container) pointed at the same table shares:
+A single box keeps its farm in a SQLite file. A **farm spread over several boxes** is one DynamoDB table
+(`FARM_STORE=dynamodb`). Every box (container) pointed at the same table shares:
 - **one task queue:** any box can pick up any task, including sub-tasks of a parent that runs elsewhere;
 - **one git origin:** task branches travel through it, so work started on one box can be merged on another.
 
@@ -48,11 +49,12 @@ STACK=farm-gil deploy/aws/deploy.sh up --table claude-farm --workspace-repo git@
 STACK=farm-gil deploy/aws/deploy.sh login     # Gil runs this and logs in to HIS account
 ```
 Any Docker host works too. Set these in `.env`:
+- `FARM_STORE=dynamodb`
 - `FARM_TABLE=claude-farm`
-- `FARM_DYNAMODB_ENDPOINT=` (empty)
+- `AWS_REGION=...`
 - `FARM_REPO_URL=...`
 
-Then remove `COMPOSE_PROFILES=local`, give the box AWS credentials for that table, and run:
+Then give the box AWS credentials for that table, and run:
 `docker compose up -d && docker exec -it claude-farm claude-farm login`.
 
 **3. See every seat:**

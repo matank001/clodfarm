@@ -5,12 +5,12 @@
 `tests/` runs without a Claude subscription or AWS:
 - `test_governor.py`: every pacing rule, the hard stops, overage, API-key mode, reset handling, and parsing of a real
   `rate_limit_event` payload.
-- `test_store.py`, against an in-process DynamoDB (moto) or DynamoDB Local (`FARM_TEST_DYNAMODB`):
+- `test_store.py`, `test_farm.py` and `test_multiseat.py` run twice, on SQLite and on DynamoDB (in-process moto, or DynamoDB Local via `FARM_TEST_DYNAMODB`). `test_store.py` covers:
   - priority order and atomic claims under 5-way contention;
   - the depth limit, parent wait/resume, and children finishing during the parent's run;
   - retries, lease reaping and lease ownership;
   - account-wide slots, snapshot ordering, the planner single-flight and back-off, pause, and spend totals.
-- `test_farm.py`: the real supervisor, store and git flow, driven by `tests/fake_claude.py`, which speaks Claude
+- `test_farm.py` runs the real supervisor, store and git flow, driven by `tests/fake_claude.py`, which speaks Claude
   Code's stream-json protocol. Covered:
   - a parent spawns sub-agents, is resumed once in its own session, merges them, and everything lands on main with
     branches cleaned up;

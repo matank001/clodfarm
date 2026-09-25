@@ -35,9 +35,9 @@ Add more boxes, or your teammates' own accounts, and they share one queue while 
 
 <table>
 <tr>
-<td width="25%" valign="top"><b>01 · Deploy</b><br><code>docker compose up -d</code> on any box, or one command on AWS with no open ports.</td>
+<td width="25%" valign="top"><b>01 · Install</b><br>One line on any box with Docker, or one command on AWS with no open ports.</td>
 <td width="25%" valign="top"><b>02 · Log in from anywhere</b><br><code>claude-farm login</code> prints a URL. Approve it on your phone and paste the code.</td>
-<td width="25%" valign="top"><b>03 · Give it a mission</b><br>Write a <code>MISSION.md</code>, queue tasks, or just talk to it in the Claude app.</td>
+<td width="25%" valign="top"><b>03 · Give it a mission</b><br><code>claude-farm mission "..."</code>, queue tasks, or just talk to it in the Claude app.</td>
 <td width="25%" valign="top"><b>04 · It keeps going</b><br>It plans, splits, tests and merges, and paces itself on your real limits.</td>
 </tr>
 </table>
@@ -63,20 +63,35 @@ No web dashboard on purpose: the Claude app, a CLI and the logs are the whole in
 
 ## Quick start
 
+One container, no config, no database to run:
+
 ```bash
-git clone https://github.com/matank001/claude-farm && cd claude-farm
-cp .env.example .env && docker compose up -d     # claude-farm + a bundled DynamoDB Local, no AWS needed
-docker exec -it claude-farm claude-farm login    # open the URL anywhere, approve, paste the code
+curl -fsSL https://raw.githubusercontent.com/matank001/claude-farm/main/scripts/install.sh | sh
 ```
 
-Give it something to do:
+It pulls the image, starts `claude-farm` (restarting on reboot), and opens the login: a URL you approve on any
+device, then paste the code back. Then give it something to do:
 
 ```bash
-docker exec claude-farm claude-farm task add "Build csv2md" --prompt "A CLI that converts CSV to Markdown tables, with tests."
+docker exec claude-farm claude-farm mission "Build csv2md: a CLI that converts CSV to Markdown tables, with tests."
 docker exec claude-farm claude-farm status
 ```
 
 Or open **Claude app → Code → claude-farm** and just talk to it.
+
+<details>
+<summary><b>Prefer plain Docker, or Compose?</b></summary>
+
+```bash
+docker run -d --name claude-farm --restart unless-stopped \
+  -v claude-farm_claude-home:/home/farm/.claude -v claude-farm_workspace:/workspace \
+  ghcr.io/matank001/claude-farm
+docker exec -it claude-farm claude-farm login
+```
+
+Or clone the repo and run `docker compose up -d`. A `.env` is optional: copy `.env.example` to change any setting.
+Either way the farm's state lives in a SQLite file inside the workspace volume, so there's nothing else to run.
+</details>
 
 > [!TIP]
 > Point it at a real repo with `FARM_REPO_URL` (plus a deploy key), set `FARM_VERIFY_CMD="pytest -q"`, and write a
@@ -93,8 +108,8 @@ You can start single and add boxes later. A new box simply joins the first one's
 
 ### Single deployment
 
-**Any Docker host:** follow the quick start above. On a remote server, log in with
-`ssh -t myserver docker exec -it claude-farm claude-farm login`.
+**Any Docker host:** run the one-line installer on the server (`ssh myserver`, then the `curl … | sh` above). Or
+start it there and log in from your laptop with `ssh -t myserver docker exec -it claude-farm claude-farm login`.
 
 **AWS** (about 10 minutes, one box, no inbound ports):
 
@@ -110,7 +125,8 @@ Remote Control, the Claude API and SSM all use outbound HTTPS only. See [docs/de
 
 ### Multiple deployments, one farm
 
-A farm is one DynamoDB table.
+A single box keeps its farm in a local SQLite file. To spread one farm over several boxes, the boxes share a
+**DynamoDB table** instead (`FARM_STORE=dynamodb`; the AWS deploy sets it for you).
 - **Shared:** every box pointed at that table shares **one queue** and **one git repo**.
 - **Per account:** each box is paced on the budget of the Claude account it's logged in to (its **seat**). When one
   seat hits a limit, only its boxes pause.
@@ -141,8 +157,8 @@ claude-farm budget   # every seat: usage bars, its boxes, what it may run right 
 <summary><b>Join from any Docker host, or add work from your laptop</b></summary>
 
 **A Docker host joining an existing farm:**
-1. In `.env`, set `FARM_TABLE=<table>`, `FARM_DYNAMODB_ENDPOINT=` (empty) and `FARM_REPO_URL=<shared repo>`, and
-   remove `COMPOSE_PROFILES=local`.
+1. In `.env`, set `FARM_STORE=dynamodb`, `FARM_TABLE=<table>`, `AWS_REGION=<region>` and
+   `FARM_REPO_URL=<shared repo>`.
 2. Give the box AWS credentials for the table.
 3. Run `docker compose up -d && docker exec -it claude-farm claude-farm login`.
 
@@ -150,7 +166,7 @@ claude-farm budget   # every seat: usage bars, its boxes, what it may run right 
 
 ```bash
 pip install git+https://github.com/matank001/claude-farm
-export FARM_TABLE=claude-farm FARM_DYNAMODB_ENDPOINT= AWS_REGION=<region>   # plus AWS credentials for the table
+export FARM_STORE=dynamodb FARM_TABLE=claude-farm AWS_REGION=<region>   # plus AWS credentials for the table
 claude-farm task add "Refactor the parser" --prompt "..." && claude-farm status
 ```
 </details>
@@ -171,7 +187,7 @@ flowchart LR
     plan[Planner<br/>reads MISSION.md]
     gate[Verify gate<br/>FARM_VERIFY_CMD]
   end
-  subgraph ddb[DynamoDB: the farm]
+  subgraph ddb[The farm store: SQLite on one box, DynamoDB across boxes]
     q[(Shared queue<br/>parents, children, leases)]
     b[(Budget per seat<br/>5h + 7d utilization)]
     s[(Slots per seat)]
@@ -259,6 +275,7 @@ Details and caveats: [docs/auth.md](docs/auth.md).
 | `claude-farm budget [--refresh]` | every seat's usage and what the governor allows it now |
 | `claude-farm task add TITLE --prompt ... [--parent ID] [--priority 0-9]` | queue work (agents use the same command) |
 | `claude-farm task list / show / cancel / retry` | inspect and manage tasks |
+| `claude-farm mission [TEXT]` | show or set `MISSION.md`, which the planner keeps the agents busy with |
 | `claude-farm events [-f]` | the event log: claims, merges, checks, pauses, limits |
 | `claude-farm pause [reason]` / `resume` | stop and restart new work on every box |
 | `claude-farm login / whoami / doctor` | login and a setup check |
@@ -281,7 +298,9 @@ Every command takes `--json`.
 | `FARM_STALL_THRESHOLD` | `5` | failed runs in a row that pause the farm |
 | `FARM_REMOTE_CONTROL` | `1` | keep a Remote Control session up |
 | `FARM_PERMISSION_MODE` | `bypassPermissions` | the container is the sandbox ([security](docs/security.md)) |
-| `FARM_TABLE` / `FARM_SEAT` | `claude-farm` / from login | which farm to join / override the seat name |
+| `FARM_MISSION` | *(empty)* | the mission, if you'd rather set it at start than with `claude-farm mission` |
+| `FARM_STORE` | `sqlite` | `dynamodb` to share one farm across boxes and accounts (setting `FARM_TABLE` implies it) |
+| `FARM_TABLE` / `FARM_SEAT` | `claude-farm` / from login | which DynamoDB farm to join / override the seat name |
 </details>
 
 ## FAQ
@@ -312,8 +331,8 @@ numbers include your own usage, so the farm backs off when you're working.
 <details>
 <summary><b>What does it cost?</b></summary>
 
-On a subscription, nothing beyond your plan. The AWS box is roughly $25/month for a t4g.medium, plus cents of
-DynamoDB (an estimate; check AWS pricing). Locally it's free.
+On a subscription, nothing beyond your plan. Locally or on your own server it's free: a single box needs no
+database. The AWS box is roughly $25/month for a t4g.medium, plus cents of DynamoDB (an estimate; check AWS pricing).
 </details>
 
 <details>

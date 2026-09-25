@@ -1,7 +1,12 @@
 # Architecture
 
-claude-farm is a small Python daemon (`claude-farm run`, about 1,500 lines with no dependencies beyond boto3) that
-supervises Claude Code processes and keeps its state in a single DynamoDB table.
+claude-farm is a small Python daemon (`claude-farm run`; the standard library plus boto3) that supervises Claude
+Code processes and keeps its state in one store:
+- **SQLite**, one file in the workspace volume, for a single box (the default);
+- **a DynamoDB table** (`FARM_STORE=dynamodb`) when several boxes and accounts share one farm.
+
+Both backends implement six primitives (`backends.py`), and all logic is written once on top of them (`store.py`).
+Every update is an optimistic, versioned read-modify-write, so claims and counters are atomic on both.
 
 ```
 container (user "farm", tini as PID 1)
@@ -17,7 +22,8 @@ container (user "farm", tini as PID 1)
 | File | Responsibility |
 |---|---|
 | `governor.py` | Pure function `decide(snapshot, policy, now) -> Decision(workers, reason, pause_until)`. No I/O. |
-| `store.py` | DynamoDB single-table access: tasks, runs, budget snapshot, slots, control switches, heartbeats, events. All state changes are conditional writes. |
+| `store.py` | Tasks, runs, per-seat budget, slots, control switches, heartbeats, events: every state change is a versioned conditional update. |
+| `backends.py` | The two stores behind it: SQLite (WAL, safe across threads and `docker exec` processes) and DynamoDB. |
 | `runner.py` | Starts one `claude -p` process, streams its JSON events, collects the result, usage and `rate_limit_event`s, and enforces a timeout. |
 | `supervisor.py` | The worker loop, the planner trigger, resume logic, git integration, the Remote Control keeper. |
 | `gitops.py` | One worktree and branch per task; rebase onto main plus fast-forward; conflicts become tasks. |
@@ -25,7 +31,7 @@ container (user "farm", tini as PID 1)
 | `auth.py` | Login detection, the waiting banner, onboarding and trust flags, the guide in `CLAUDE.md`. |
 | `cli.py` | The `claude-farm` command, shared by humans and agents. |
 
-## Data model (one table)
+## Data model (one table, same shape in SQLite and DynamoDB)
 
 | PK | SK | What |
 |---|---|---|

@@ -32,9 +32,15 @@ def ddb_endpoint():
     server.stop()
 
 
+@pytest.fixture(params=["sqlite", "dynamodb"])
+def backend(request):
+    """Every store and farm test runs on both backends."""
+    return request.param
+
+
 @pytest.fixture
-def env(tmp_path, ddb_endpoint, monkeypatch):
-    """A clean farm environment: own table, workspace, Claude home and a fake claude binary."""
+def env(tmp_path, backend, request, monkeypatch):
+    """A clean farm environment: own table (or SQLite file), workspace, Claude home and a fake claude binary."""
     table = "t" + uuid.uuid4().hex[:10]
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -43,7 +49,8 @@ def env(tmp_path, ddb_endpoint, monkeypatch):
     fake.chmod(fake.stat().st_mode | stat.S_IEXEC)
     values = {
         "FARM_TABLE": table,
-        "FARM_DYNAMODB_ENDPOINT": ddb_endpoint,
+        "FARM_STORE": backend,
+        "FARM_DB": str(tmp_path / "farm.db"),
         "AWS_REGION": "us-east-1",
         "AWS_ACCESS_KEY_ID": "test",
         "AWS_SECRET_ACCESS_KEY": "test",
@@ -59,6 +66,10 @@ def env(tmp_path, ddb_endpoint, monkeypatch):
         "PATH": f"{bin_dir}:{os.environ['PATH']}",
         "GIT_AUTHOR_NAME": "t", "GIT_AUTHOR_EMAIL": "t@t", "GIT_COMMITTER_NAME": "t", "GIT_COMMITTER_EMAIL": "t@t",
     }
+    if backend == "dynamodb":
+        values["FARM_DYNAMODB_ENDPOINT"] = request.getfixturevalue("ddb_endpoint")
+    else:
+        monkeypatch.delenv("FARM_DYNAMODB_ENDPOINT", raising=False)
     for k, v in values.items():
         monkeypatch.setenv(k, v)
     for k in ("CLAUDE_CODE_OAUTH_TOKEN", "FARM_TASK_ID", "FARM_REPO_URL"):
