@@ -63,9 +63,11 @@ def test_parent_spawns_sub_agents_and_everything_merges(env):
         kids = [farm.store.get_task(c) for c in task["children"]]
         assert [k["status"] for k in kids] == ["done", "done"]
         assert {"child0.txt", "child1.txt"} <= repo_files(env), "children land on main through the parent"
-        branches = subprocess.run(["git", "-C", str(env / "workspace" / "repo"), "branch", "--list", "farm/*"],
+        def branches():
+            return subprocess.run(["git", "-C", str(env / "workspace" / "repo"), "branch", "--list", "farm/*"],
                                   capture_output=True, text=True).stdout.split()
-        assert branches == [], "merged task branches are cleaned up"
+        # cleanup runs right after the task is marked done, so give it a moment
+        wait_for(lambda: branches() == [], timeout=15)
         resumed = [c for c in calls(env) if c.get("task") == tid and c.get("resume")]
         assert len(resumed) == 1, "the parent is resumed once, in its own session"
         assert farm.store.get_snapshot() is not None, "every run reports real usage"
