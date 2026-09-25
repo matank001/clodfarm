@@ -61,3 +61,16 @@ The task: write `strutil.slugify` yourself, delegate `truncate` to exactly one s
     created.
   - `claude-farm budget` read 14% of the 5-hour window and 21% of the 7-day window from the live
     `rate_limit_event`. DynamoDB access worked through the instance role, with no keys on the box.
+
+**2026-09-25, AWS, after the store rewrite (SQLite + DynamoDB behind one interface):**
+- **Test 3** (parent + sub-agent on DynamoDB): it landed with the check passing. It exposed an item written by the
+  previous version without a version number, which looped forever. Fixed: legacy items are adopted, and a late
+  error on a finished task is a no-op. Both have regression tests.
+- **Test 4:** landed, check passed, no errors.
+- **Restart test:**
+  - `docker compose restart` while a task was running;
+  - the stopping box logged `task.restart`, and the new container claimed the same task again within seconds, in
+    its own session;
+  - before this fix it waited for its 5-minute lease.
+- **Zero-config image** (locally, no `.env`, no database): `doctor` showed `farm store: sqlite
+  /workspace/.farm/farm.db` and the login banner.
