@@ -7,8 +7,9 @@ Items (PK / SK):
 
     TASK#<id>        / META              a task (GSI1PK = STATUS#<status>)
     TASK#<id>        / RUN#<ts>          one agent run of that task (usage, cost)
-    BUDGET           / LATEST            newest rate_limit snapshot for the account
-    SLOT             / <n>               concurrency slot n (global lease)
+    BUDGET           / <seat>            newest rate_limit snapshot of that Claude account (seat)
+    SLOT             / <seat>#<n>        concurrency slot n of that seat (lease, shared by its boxes)
+    SPEND            / <seat>#<day>      API-mode list-price spend per seat and day
     WORKER           / <farm>/<worker>   heartbeat
     CONTROL          / GLOBAL            pause switch
     CONTROL          / PLANNER           planner single-flight + back-off
@@ -32,6 +33,7 @@ from botocore.exceptions import ClientError
 from .governor import Snapshot
 
 EVENT_TTL = 30 * 86400
+DEFAULT_SEAT = "default"  # single-account farms and tests
 OPEN = ("queued", "running", "waiting")
 
 
@@ -209,11 +211,17 @@ class Store:
                 return False
             raise
 
-    def claim_next(self, worker: str, lease: int) -> dict | None:
-        """Atomically take the highest-priority queued task."""
-        r = self.t.query(IndexName="GSI1", KeyConditionExpression=Key("GSI1PK").eq("STATUS#queued"), Limit=10)
+    def claim_next(self, worker: str, lease: int, farm: str | None = None, affinity: float = 600) -> dict | None:
+        """Atomically take the highest-priority queued task.
+
+        A task waiting to be *resumed* keeps its conversation on the box it last ran on (``home``). For ``affinity``
+        seconds only that box may take it; after that anyone may, starting fresh with the results so far."""
+        r = self.t.query(IndexName="GSI1", KeyConditionExpression=Key("GSI1PK").eq("STATUS#queued"), Limit=25)
         for item in r.get("Items", []):
             tid = item["id"]
+            if farm and item.get("resume") and item.get("home") and item["home"] != farm \
+                    and now() - float(item.get("updated", 0)) < affinity:
+                continue
             ok = self._set_status(tid, "running", cond=Attr("status").eq("queued"),
                                   extra={"worker": worker, "lease_until": now() + lease, "started": now()})
             if ok:
@@ -349,51 +357,59 @@ class Store:
         return [_plain(i) for i in r.get("Items", [])]
 
     # ---------------------------------------------------------------- budget
-    def put_snapshot(self, snap: Snapshot):
-        """Keep only the newest observation (several workers report at once)."""
+    # Everything budget-related is per seat (one Claude account): snapshots, slots, spend. The queue is shared.
+    def put_snapshot(self, snap: Snapshot, seat: str = DEFAULT_SEAT):
+        """Keep only the newest observation per seat (several workers report at once)."""
         try:
-            self.t.put_item(Item=_clean({"PK": "BUDGET", "SK": "LATEST", **snap.to_dict()}),
+            self.t.put_item(Item=_clean({"PK": "BUDGET", "SK": seat, "seat": seat, **snap.to_dict()}),
                             ConditionExpression=Attr("observed_at").not_exists()
                             | Attr("observed_at").lt(Decimal(str(snap.observed_at))))
         except ClientError as e:
             if not _conditional_failed(e):
                 raise
 
-    def get_snapshot(self) -> Snapshot | None:
-        r = self.t.get_item(Key={"PK": "BUDGET", "SK": "LATEST"})
+    def get_snapshot(self, seat: str = DEFAULT_SEAT) -> Snapshot | None:
+        r = self.t.get_item(Key={"PK": "BUDGET", "SK": seat})
         return Snapshot.from_dict(_plain(r["Item"])) if "Item" in r else None
 
-    def add_spend(self, usd: float, ts: float | None = None):
-        """Running total of list-price spend per UTC day (the API-mode daily cap reads it)."""
+    def snapshots(self) -> dict[str, Snapshot]:
+        """Every seat's newest snapshot."""
+        r = self.t.query(KeyConditionExpression=Key("PK").eq("BUDGET"))
+        return {i["SK"]: Snapshot.from_dict(_plain(i)) for i in r.get("Items", [])}
+
+    def add_spend(self, usd: float, seat: str = DEFAULT_SEAT, ts: float | None = None):
+        """Running total of list-price spend per seat and UTC day (the API-mode daily cap reads it)."""
         if usd <= 0:
             return
         day = time.strftime("%Y-%m-%d", time.gmtime(ts if ts is not None else now()))
-        self.t.update_item(Key={"PK": "SPEND", "SK": day}, UpdateExpression="ADD usd :u SET expires_at = :e",
+        self.t.update_item(Key={"PK": "SPEND", "SK": f"{seat}#{day}"}, UpdateExpression="ADD usd :u SET expires_at = :e",
                            ExpressionAttributeValues=_clean({":u": float(usd), ":e": int(now() + 90 * 86400)}))
 
-    def spent_today(self) -> float:
+    def spent_today(self, seat: str = DEFAULT_SEAT) -> float:
         day = time.strftime("%Y-%m-%d", time.gmtime())
-        r = self.t.get_item(Key={"PK": "SPEND", "SK": day}).get("Item")
+        r = self.t.get_item(Key={"PK": "SPEND", "SK": f"{seat}#{day}"}).get("Item")
         return float(r["usd"]) if r else 0.0
 
-    def acquire_slot(self, holder: str, allowed: int, lease: int) -> int | None:
-        """Take one of ``allowed`` account-wide concurrency slots."""
+    def acquire_slot(self, holder: str, allowed: int, lease: int, seat: str = DEFAULT_SEAT) -> str | None:
+        """Take one of ``allowed`` concurrency slots of this seat, shared by every box logged in to it.
+        Returns the slot key (renew and release with it)."""
         t = now()
         for n in range(allowed):
+            key = f"{seat}#{n:03d}"
             try:
                 self.t.put_item(
-                    Item=_clean({"PK": "SLOT", "SK": f"{n:03d}", "holder": holder, "lease_until": t + lease}),
+                    Item=_clean({"PK": "SLOT", "SK": key, "seat": seat, "holder": holder, "lease_until": t + lease}),
                     ConditionExpression=Attr("holder").not_exists() | Attr("holder").eq(holder)
                     | Attr("lease_until").lt(Decimal(str(t))))
-                return n
+                return key
             except ClientError as e:
                 if not _conditional_failed(e):
                     raise
         return None
 
-    def renew_slot(self, n: int, holder: str, lease: int) -> bool:
+    def renew_slot(self, key: str, holder: str, lease: int) -> bool:
         try:
-            self.t.update_item(Key={"PK": "SLOT", "SK": f"{n:03d}"}, UpdateExpression="SET lease_until = :l",
+            self.t.update_item(Key={"PK": "SLOT", "SK": key}, UpdateExpression="SET lease_until = :l",
                                ConditionExpression=Attr("holder").eq(holder),
                                ExpressionAttributeValues=_clean({":l": now() + lease}))
             return True
@@ -402,15 +418,17 @@ class Store:
                 return False
             raise
 
-    def release_slot(self, n: int, holder: str):
+    def release_slot(self, key: str, holder: str):
         try:
-            self.t.delete_item(Key={"PK": "SLOT", "SK": f"{n:03d}"}, ConditionExpression=Attr("holder").eq(holder))
+            self.t.delete_item(Key={"PK": "SLOT", "SK": key}, ConditionExpression=Attr("holder").eq(holder))
         except ClientError as e:
             if not _conditional_failed(e):
                 raise
 
-    def slots(self) -> list[dict]:
-        r = self.t.query(KeyConditionExpression=Key("PK").eq("SLOT"))
+    def slots(self, seat: str | None = None) -> list[dict]:
+        kw = {"KeyConditionExpression": Key("PK").eq("SLOT") & Key("SK").begins_with(f"{seat}#")} if seat else \
+            {"KeyConditionExpression": Key("PK").eq("SLOT")}
+        r = self.t.query(**kw)
         return [_plain(i) for i in r.get("Items", []) if float(i.get("lease_until", 0)) > now()]
 
     # --------------------------------------------------------------- control
@@ -463,9 +481,9 @@ class Store:
         return _plain(self.t.get_item(Key={"PK": "CONTROL", "SK": "PLANNER"}).get("Item", {}))
 
     # --------------------------------------------------------- heartbeats/log
-    def heartbeat(self, farm: str, worker: str, state: str, task: str | None = None):
+    def heartbeat(self, farm: str, worker: str, state: str, task: str | None = None, seat: str | None = None):
         self.t.put_item(Item=_clean({"PK": "WORKER", "SK": f"{farm}/{worker}", "state": state, "task": task,
-                                     "at": now(), "expires_at": int(now() + 86400)}))
+                                     "seat": seat, "at": now(), "expires_at": int(now() + 86400)}))
 
     def workers(self, max_age: int = 600) -> list[dict]:
         r = self.t.query(KeyConditionExpression=Key("PK").eq("WORKER"))

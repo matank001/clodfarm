@@ -12,6 +12,8 @@ First public release.
 - A planner that keeps the agents busy from `MISSION.md`.
 - A git worktree per task. Sub-tasks branch from their parent, and top-level tasks rebase and fast-forward into main.
 - Docker image, docker compose with DynamoDB Local, and an AWS CloudFormation deploy with no inbound ports.
+- **Several Claude accounts in one farm:** a per-seat budget, slots and spend, a shared queue, task branches shared
+  through origin, and session affinity for resumed parents. `claude-farm budget` and `status` show every seat.
 - Quality gate (`FARM_VERIFY_CMD`): check the rebased branch before it lands; resume the agent to fix failures.
 - Timeouts resume the session instead of starting over; a circuit breaker pauses the farm after repeated failures.
 - Notifications to ntfy, Slack or Discord (`FARM_NOTIFY_URL`); `FARM_EFFORT`.

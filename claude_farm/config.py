@@ -43,6 +43,8 @@ class Config:
     max_resumes: int
     idle_sleep: int
     push: bool
+    seat: str  # FARM_SEAT: override the seat id derived from the login ("" = derive it)
+    resume_affinity: int  # seconds a resumed task waits for the box that holds its conversation
     effort: str  # --effort for every agent run ("" = Claude Code's default)
     verify_cmd: str  # shell command that must pass before a top-level task lands on main ("" = none)
     verify_timeout: int
@@ -94,6 +96,8 @@ def load() -> Config:
         push=_bool("FARM_PUSH", True),
         task_budget_usd=float(_env("FARM_TASK_BUDGET_USD", "0")),
         effort=_env("FARM_EFFORT", ""),
+        seat=_env("FARM_SEAT", ""),
+        resume_affinity=int(_env("FARM_RESUME_AFFINITY", "600")),
         verify_cmd=_env("FARM_VERIFY_CMD", ""),
         verify_timeout=int(_env("FARM_VERIFY_TIMEOUT", "900")),
         verify_fixes=int(_env("FARM_VERIFY_FIXES", "2")),

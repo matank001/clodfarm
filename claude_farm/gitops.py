@@ -75,6 +75,27 @@ def ensure_excludes(repo: str):
             f.write(("\n" if cur and not cur.endswith("\n") else "") + _EXCLUDE_MARK + "\n" + DEFAULT_EXCLUDES)
 
 
+def fetch_branch(repo: str, branch: str) -> bool:
+    """Get a task branch another box pushed (several boxes share work through origin). Never fails the caller."""
+    if not has_origin(repo):
+        return False
+    return subprocess.run(["git", "-C", repo, "fetch", "-q", "origin", f"+refs/heads/{branch}:refs/heads/{branch}"],
+                          capture_output=True, text=True).returncode == 0
+
+
+def push_branch(repo: str, branch: str) -> bool:
+    """Publish a task branch so its parent can merge it on any box."""
+    if not has_origin(repo):
+        return False
+    return subprocess.run(["git", "-C", repo, "push", "-q", "-f", "origin", f"refs/heads/{branch}:refs/heads/{branch}"],
+                          capture_output=True, text=True).returncode == 0
+
+
+def delete_remote_branch(repo: str, branch: str):
+    if has_origin(repo):
+        subprocess.run(["git", "-C", repo, "push", "-q", "origin", "--delete", branch], capture_output=True, text=True)
+
+
 def ensure_repo(repo: str, url: str | None):
     """Clone ``url`` into ``repo`` on first start, or create an empty repo."""
     if is_repo(repo):
@@ -102,6 +123,11 @@ def worktree_for(repo: str, task_id: str, base: str | None = None) -> tuple[str,
     if os.path.isdir(path):
         return path, branch
     with _lock:
+        # on a multi-box farm the base (parent's branch) or this task's own branch may live on another box
+        if not git(repo, "branch", "--list", branch):
+            fetch_branch(repo, branch)
+        if base and not git(repo, "branch", "--list", base):
+            fetch_branch(repo, base)
         if base is None or not git(repo, "branch", "--list", base):
             base = main_branch(repo)
             if has_origin(repo):

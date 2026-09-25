@@ -6,8 +6,10 @@ claude-farm never reads, copies or prints credentials. It only asks Claude Code
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
+import re
 import subprocess
 import tempfile
 
@@ -47,6 +49,21 @@ def auth_status(claude_bin: str = "claude") -> dict:
     elif st.get("loggedIn"):
         st["via"] = f"login saved in {claude_home()}"
     return st
+
+
+def seat_id(status: dict) -> str:
+    """A stable, readable id for the Claude account this box is logged in to (e.g. ``matan-3f2a``).
+    Derived from what `claude auth status` reports; the full email is never stored. FARM_SEAT overrides it."""
+    if os.environ.get("FARM_SEAT"):
+        return re.sub(r"[^A-Za-z0-9_.-]", "-", os.environ["FARM_SEAT"])[:40]
+    if "API" in (status.get("via") or ""):
+        key = os.environ.get("ANTHROPIC_API_KEY", "")
+        return "api-" + hashlib.sha256(key.encode()).hexdigest()[:6]
+    who = status.get("email") or status.get("orgId") or ""
+    if not who:
+        return "default"
+    local = re.sub(r"[^a-z0-9]", "", who.split("@")[0].lower())[:16] or "seat"
+    return f"{local}-{hashlib.sha256(who.lower().encode()).hexdigest()[:4]}"
 
 
 def banner(cfg) -> str:

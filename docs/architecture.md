@@ -31,8 +31,9 @@ container (user "farm", tini as PID 1)
 |---|---|---|
 | `TASK#<id>` | `META` | A task: title, prompt, status, priority, parent, children, depth, attempts, session id, worktree, result. `GSI1PK = STATUS#<status>` and `GSI1SK = <9-priority>#<created>` make "next queued task" one index query. |
 | `TASK#<id>` | `RUN#<ts>` | One agent run: duration, turns, output tokens, list-price cost, utilization before and after. |
-| `BUDGET` | `LATEST` | Newest `rate_limit_event` snapshot. The write is conditional on `observed_at` being newer. |
-| `SLOT` | `000..` | Account-wide concurrency slots with leases. |
+| `BUDGET` | `<seat>` | Newest `rate_limit_event` snapshot of that Claude account. The write is conditional on `observed_at` being newer. |
+| `SLOT` | `<seat>#000..` | Per-seat concurrency slots with leases, shared by every box on that seat. |
+| `SPEND` | `<seat>#<day>` | API-mode list-price spend per seat and day. |
 | `CONTROL` | `GLOBAL` / `PLANNER` | The pause switch; planner single-flight and back-off. |
 | `WORKER` | `<farm>/<worker>` | Heartbeats (TTL 1 day). |
 | `EVENT#<day>` | `<ts>#<rand>` | Event log (TTL 30 days). |
@@ -96,9 +97,14 @@ on first start, so that only happens if you remove it.
 
 ## Scaling out
 
-Run the same image on more boxes with the same `FARM_TABLE` (and real DynamoDB). They share the queue, the
-slots and the budget. `FARM_MAX_WORKERS` is per box, and the governor's cap is account-wide. Keep all boxes on
-the **same** subscription: a table is one budget.
+Run the same image on more boxes with the same `FARM_TABLE` (real DynamoDB) and the same `FARM_REPO_URL`:
+- **Shared:** they share the queue, and task branches travel through origin.
+- **Per seat:** each box works out its seat from its login. The budget, slots and spend are per seat, and the
+  governor caps each seat's concurrency across all of that seat's boxes.
+- **Per box:** `FARM_MAX_WORKERS` is per box.
+- **Sessions:** a resumed task prefers the box holding its session for `FARM_RESUME_AFFINITY` seconds.
+
+See [multi-seat.md](multi-seat.md).
 
 ## What claude-farm deliberately doesn't do
 

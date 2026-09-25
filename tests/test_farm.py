@@ -108,7 +108,7 @@ def test_governor_throttles_when_the_five_hour_window_is_nearly_used(env, monkey
         second = json.loads(cli("task", "add", "second", "--prompt", "COMMIT second", "--json").stdout)["id"]
         time.sleep(4)
         assert farm.store.get_task(second)["status"] == "queued"
-        assert "5-hour window" in json.loads(cli("budget", "--json").stdout)["decision"]["reason"]
+        assert "5-hour window" in json.loads(cli("budget", "--json").stdout)["seats"][0]["decision"]["reason"]
     finally:
         stop_farm(farm, t)
 

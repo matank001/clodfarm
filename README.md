@@ -42,7 +42,7 @@ claude-farm handles those parts:
 | **Checked before it lands** | Set `FARM_VERIFY_CMD` (e.g. `pytest -q`). A finished task is rebased onto main and the check runs. If it fails, the agent is resumed *in its own session* with the failure output, and nothing reaches main until the check passes. |
 | **Fails safely** | A timed-out run continues in its session instead of starting over. N failed runs in a row trip a circuit breaker that pauses every box. `FARM_NOTIFY_URL` (ntfy, Slack or Discord) tells you when a task fails, the farm pauses, a limit hits, or the mission is done. |
 | **Steerable from your phone** | `claude remote-control` stays up, so the farm shows up in the Claude app and at claude.ai/code. |
-| **One budget, many boxes** | Point several containers at the same DynamoDB table and they share one queue and one governor. |
+| **Many boxes, many Claude accounts, one farm** | Point any number of containers at the same DynamoDB table, each logged in to its own account (yours, a teammate's Team seat). They share one queue and one git origin, but **every account gets its own budget**: the governor paces each seat on its own real usage, so when one seat hits a limit, the others keep working. See [docs/multi-seat.md](docs/multi-seat.md). |
 
 ## Quick start (local, no AWS account needed)
 
@@ -83,6 +83,21 @@ You need the AWS CLI v2 and the
 The box has **no inbound ports**: Remote Control, the Claude API and SSM all use outbound HTTPS. See
 [docs/deploy-aws.md](docs/deploy-aws.md). Any other Linux host works too: `docker compose up -d`, then
 `ssh -t host docker exec -it claude-farm claude-farm login`.
+
+## One farm, several Claude accounts
+
+```bash
+deploy/aws/deploy.sh up --workspace-repo git@github.com:you/repo.git                 # box 1: creates the farm (table "claude-farm")
+STACK=farm-gil deploy/aws/deploy.sh up --table claude-farm --workspace-repo git@github.com:you/repo.git
+STACK=farm-gil deploy/aws/deploy.sh login                                             # Gil logs in to HIS account
+claude-farm budget                                                                     # every seat, its usage, what it may run
+```
+- **Shared across boxes:** the queue, and the git origin, so a sub-task can run on Gil's box and be merged by a
+  parent on yours.
+- **Separate per seat:** the budget, usage snapshots and concurrency slots.
+- **Sessions:** a resumed parent waits a few minutes for the box that holds its conversation.
+- **Terms:** use Team/Enterprise seats for people working together, each person on their own login. Details and
+  the terms in [docs/multi-seat.md](docs/multi-seat.md).
 
 ## Logging in (the part people ask about)
 
@@ -155,7 +170,8 @@ agents are told: [docs/agents.md](docs/agents.md).
 ## The budget governor in one paragraph
 
 Utilization numbers come from Claude Code itself and cover the **whole account**, including your own chats and
-sessions, so the farm backs off when you use Claude.
+sessions, so the farm backs off when you use Claude. With several accounts in one farm, each seat is paced
+separately on its own numbers.
 - **Weekly window:** agents stop at 80% of the window by default, so the rest stays yours. The governor follows a
   pace line (`target × fraction of the week elapsed + 5%`). Ahead of the line it slows down or stops until the line
   catches up; behind it, it runs at full concurrency.
@@ -170,7 +186,7 @@ All thresholds are in `.env`. The governor is a pure function with unit tests: [
 | Command | |
 |---|---|
 | `claude-farm status` | budget, queue, workers, running tasks |
-| `claude-farm budget [--refresh]` | utilization and the governor's decision (`--refresh` makes one tiny call to measure) |
+| `claude-farm budget [--refresh]` | every seat's utilization and the governor's decision for it (`--refresh` measures this box's seat) |
 | `claude-farm task add TITLE --prompt ... [--parent ID] [--priority 0-9]` | queue work (agents use the same command) |
 | `claude-farm task list / show ID / cancel ID / retry ID` | inspect and manage tasks |
 | `claude-farm events [-f]` | the event log (claims, merges, pauses, rate limits) |
@@ -226,7 +242,8 @@ individual usage, and they forbid reselling or intermediating Claude usage. So:
 - don't share one login;
 - for team or commercial workloads use an API key (option D) or your organisation's plan.
 
-claude-farm doesn't rotate accounts, pool subscriptions or dodge limits: the governor exists to stay well under them.
+claude-farm never shares or rotates logins and never moves one account's limits onto another. Each seat is
+paced on its own usage, and the governor exists to stay well under the limits.
 Read the current [Consumer Terms](https://www.anthropic.com/legal/consumer-terms) and
 [Usage Policy](https://www.anthropic.com/legal/aup) yourself; this README isn't legal advice.
 

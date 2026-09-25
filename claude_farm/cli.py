@@ -88,47 +88,65 @@ def cmd_whoami(cfg, a):
     return 0 if st.get("loggedIn") else 1
 
 
-def _budget(cfg, store):
-    snap = store.get_snapshot()
-    d = decide(snap, cfg.policy, now(), store.spent_today())
-    return snap, d
+def _seats(cfg, store) -> list[dict]:
+    """Every Claude account (seat) in this farm: its latest usage, the governor's decision for it, its slots."""
+    snaps = store.snapshots()
+    workers = store.workers()
+    names = sorted(set(snaps) | {w.get("seat") for w in workers if w.get("seat")}) or ["default"]
+    out = []
+    for seat in names:
+        snap = snaps.get(seat)
+        policy = cfg.policy if seat.startswith("api-") == cfg.policy.api_mode else \
+            type(cfg.policy)(**{**vars(cfg.policy), "api_mode": seat.startswith("api-")})
+        d = decide(snap, policy, now(), store.spent_today(seat))
+        out.append({"seat": seat, "snapshot": snap, "decision": d, "policy": policy, "slots": store.slots(seat),
+                    "boxes": sorted({w["SK"].rsplit("/", 1)[0] for w in workers if w.get("seat") == seat})})
+    return out
 
 
-def _budget_text(cfg, snap, d, slots) -> str:
-    p = cfg.policy
+def _seat_text(r) -> str:
+    seat, snap, d, p = r["seat"], r["snapshot"], r["decision"], r["policy"]
+    boxes = f"  boxes: {', '.join(r['boxes'])}" if r["boxes"] else "  (no live box)"
+    lines = [f"SEAT {seat}{boxes}"]
     if p.api_mode:
         cap = f"${p.daily_budget_usd:.2f}/day" if p.daily_budget_usd else "no daily cap (set FARM_DAILY_BUDGET_USD)"
-        return "\n".join([f"BUDGET (API key, list-price spend): ${d.details.get('spent_today_usd', 0):.2f} today, {cap}",
-                          f"GOVERNOR  {d.workers}/{p.max_workers} agents allowed now: {d.reason}",
-                          f"  slots in use: {len(slots)}"])
-    lines = ["BUDGET (account-wide, from Claude Code's own rate-limit reports)"]
-    if not snap:
-        lines.append("  no usage report yet: the first agent run will measure it (or run `claude-farm budget --refresh`)")
+        lines.append(f"  API key, list-price spend ${d.details.get('spent_today_usd', 0):.2f} today, {cap}")
+    elif not snap:
+        lines.append("  no usage report yet: its first agent run measures it (or `claude-farm budget --refresh` on that box)")
     else:
         for name, w, cap in (("5-hour", snap.five_hour, p.five_hour_ceiling), ("7-day", snap.seven_day, p.weekly_target)):
             if w:
                 lines.append(f"  {name:<7} {_pct(w.utilization):>5} used   limit for agents {cap:.0%}   resets {_until(w.resets_at)}")
         lines.append(f"  status  {snap.status}{'  (paid overage in use)' if snap.using_overage else ''}   measured {_ago(snap.observed_at)} ago")
-    lines.append(f"GOVERNOR  {d.workers}/{p.max_workers} agents allowed now: {d.reason}")
+    lines.append(f"  governor: {d.workers}/{p.max_workers} agents allowed now, {len(r['slots'])} running: {d.reason}")
     if d.pause_until:
         lines.append(f"  next check {_until(d.pause_until)}")
-    lines.append(f"  slots in use: {len(slots)}")
     return "\n".join(lines)
+
+
+def _budget_text(rows) -> str:
+    head = "BUDGET per Claude account (seat), from Claude Code's own rate-limit reports; the queue is shared"
+    return "\n".join([head] + [_seat_text(r) for r in rows])
+
+
+def _seats_json(rows):
+    return [{"seat": r["seat"], "snapshot": r["snapshot"].to_dict() if r["snapshot"] else None,
+             "decision": r["decision"].to_dict(), "slots": r["slots"], "boxes": r["boxes"]} for r in rows]
 
 
 def cmd_budget(cfg, a):
     store = _store(cfg)
     if a.refresh:
         from .runner import build_cmd, run_agent
+        from .auth import seat_id
+        seat = cfg.seat or seat_id(auth_status(cfg.claude_bin))
         res = run_agent(build_cmd(cfg, "Answer in one word."), "Reply with: ok", cfg.workspace
                         if os.path.isdir(cfg.workspace) else os.getcwd(), dict(os.environ), 180,
-                        on_snapshot=store.put_snapshot)
+                        on_snapshot=lambda sn: store.put_snapshot(sn, seat))
         if not res.snapshots:
             print(f"no rate-limit report received ({res.text[:200]})", file=sys.stderr)
-    snap, d = _budget(cfg, store)
-    slots = store.slots()
-    _out({"snapshot": snap.to_dict() if snap else None, "decision": d.to_dict(), "policy": vars(cfg.policy),
-          "slots": slots}, a.json, _budget_text(cfg, snap, d, slots))
+    rows = _seats(cfg, store)
+    _out({"seats": _seats_json(rows), "policy": vars(cfg.policy)}, a.json, _budget_text(rows))
     return 0
 
 
@@ -140,24 +158,25 @@ def _task_line(t) -> str:
 
 def cmd_status(cfg, a):
     store = _store(cfg)
-    snap, d = _budget(cfg, store)
+    rows = _seats(cfg, store)
     counts = {s: store.count(s) for s in ("queued", "running", "waiting", "done", "failed")}
     workers = store.workers()
     ctl = store.control()
     if a.json:
-        _out({"farm": cfg.farm_id, "paused": ctl, "counts": counts, "workers": workers, "decision": d.to_dict(),
-              "snapshot": snap.to_dict() if snap else None}, True, "")
+        _out({"farm": cfg.farm_id, "paused": ctl, "counts": counts, "workers": workers, "seats": _seats_json(rows)},
+             True, "")
         return 0
     print(f"claude-farm {__version__}  farm {cfg.farm_id}  table {cfg.table}"
           + (f"  PAUSED: {ctl.get('reason') or 'by hand'}" if ctl.get("paused") else ""))
-    print(_budget_text(cfg, snap, d, store.slots()))
+    print(_budget_text(rows))
     rc = [e for e in store.events(now() - 7 * 86400, 500) if e["type"] == "rc.connected"]
     if rc:
         print(f"REMOTE    {rc[-1]['msg']}")
     print("QUEUE     " + "  ".join(f"{k} {v}" for k, v in counts.items()))
     print("WORKERS")
     for w in sorted(workers, key=lambda w: w["SK"]):
-        print(f"  {w['SK']:<40} {_ago(w.get('at')):>5}  {w.get('state', '')}{'  ' + w['task'] if w.get('task') else ''}")
+        print(f"  {w['SK']:<40} {w.get('seat') or '':<16} {_ago(w.get('at')):>5}  {w.get('state', '')}"
+              f"{'  ' + w['task'] if w.get('task') else ''}")
     if not workers:
         print("  (none: is `claude-farm run` up?)")
     active = store.list_tasks("running") + store.list_tasks("waiting") + store.list_tasks("queued", 10)

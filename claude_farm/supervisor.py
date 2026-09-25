@@ -21,7 +21,7 @@ import threading
 import time
 
 from . import gitops, notify, prompts
-from .auth import accept_remote_control, auth_status, banner, install_guide, trust_directory
+from .auth import accept_remote_control, auth_status, banner, install_guide, seat_id, trust_directory
 from .config import Config, load
 from .governor import Snapshot, decide
 from .runner import build_cmd, run_agent
@@ -34,6 +34,7 @@ ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\]8;;[^\x07\x1b]*(?:\x07|\x1b\\)?
 class Farm:
     def __init__(self, cfg: Config, store: Store):
         self.cfg, self.store = cfg, store
+        self.seat = cfg.seat or "default"  # the Claude account this box runs on; set from the login in wait_for_auth
         store.echo = True
         self.stop = threading.Event()
         self.procs: dict[str, subprocess.Popen] = {}
@@ -104,7 +105,9 @@ class Farm:
         while not self.stop.is_set():
             st = auth_status(self.cfg.claude_bin)
             if st.get("loggedIn"):
-                print(f"authenticated: {st.get('authMethod')} ({st.get('subscriptionType') or 'token'})", flush=True)
+                self.seat = self.cfg.seat or seat_id(st)
+                print(f"authenticated: {st.get('authMethod')} ({st.get('subscriptionType') or 'token'}), seat {self.seat}",
+                      flush=True)
                 return
             if now() - shown > 300:
                 print(banner(self.cfg), flush=True)
@@ -113,7 +116,7 @@ class Farm:
         raise SystemExit(0)
 
     def print_status(self):
-        d = decide(self.store.get_snapshot(), self.cfg.policy, now(), self.store.spent_today())
+        d = decide(self.store.get_snapshot(self.seat), self.cfg.policy, now(), self.store.spent_today(self.seat))
         counts = {s: self.store.count(s) for s in ("queued", "running", "waiting")}
         print(json.dumps({"at": iso(), "status": counts, "budget": d.to_dict()}), flush=True)
 
@@ -163,28 +166,29 @@ class Farm:
                 self.worker_step(wid, holder)
             except Exception as e:
                 print(f"{wid}: error: {e!r}", flush=True)
-                self.store.heartbeat(self.cfg.farm_id, wid, f"error: {e}"[:200])
+                self.store.heartbeat(self.cfg.farm_id, wid, f"error: {e}"[:200], seat=self.seat)
                 self.stop.wait(30)
 
     def worker_step(self, wid: str, holder: str):
         cfg, store = self.cfg, self.store
         ctl = store.control()
         if ctl.get("paused"):
-            store.heartbeat(cfg.farm_id, wid, f"paused: {ctl.get('reason') or 'by hand'}")
+            store.heartbeat(cfg.farm_id, wid, f"paused: {ctl.get('reason') or 'by hand'}", seat=self.seat)
             self.stop.wait(cfg.idle_sleep)
             return
-        d = decide(store.get_snapshot(), cfg.policy, now(), store.spent_today())
-        slot = store.acquire_slot(holder, d.workers, cfg.lease_seconds) if d.workers else None
+        # this seat's own budget decides; other seats in the farm are paced separately
+        d = decide(store.get_snapshot(self.seat), cfg.policy, now(), store.spent_today(self.seat))
+        slot = store.acquire_slot(holder, d.workers, cfg.lease_seconds, self.seat) if d.workers else None
         if slot is None:
             wait = cfg.idle_sleep if not d.pause_until else max(10, min(300, d.pause_until - now()))
-            store.heartbeat(cfg.farm_id, wid, f"throttled: {d.reason}")
+            store.heartbeat(cfg.farm_id, wid, f"throttled: {d.reason}", seat=self.seat)
             self.stop.wait(wait)
             return
         try:
-            task = store.claim_next(holder, cfg.lease_seconds)
+            task = store.claim_next(holder, cfg.lease_seconds, cfg.farm_id, cfg.resume_affinity)
             if not task:
                 self.maybe_plan()
-                store.heartbeat(cfg.farm_id, wid, "idle")
+                store.heartbeat(cfg.farm_id, wid, "idle", seat=self.seat)
                 store.release_slot(slot, holder)
                 slot = None
                 self.stop.wait(cfg.idle_sleep)
@@ -217,7 +221,7 @@ class Farm:
     def run_task(self, task: dict, wid: str, holder: str, slot: int):
         cfg, store = self.cfg, self.store
         tid = task["id"]
-        store.heartbeat(cfg.farm_id, wid, "running", tid)
+        store.heartbeat(cfg.farm_id, wid, "running", tid, seat=self.seat)
         use_git = gitops.is_repo(cfg.repo_dir)
         branch = None
         parent_branch = f"farm/{task['parent']}" if task.get("parent") else None
@@ -244,6 +248,9 @@ class Farm:
                 prompt = prompts.timeout_prompt(cfg.task_timeout)
             else:
                 children = [store.get_task(c) for c in task.get("children", [])]
+                for c in children:  # a child may have run on another box: get its branch from origin
+                    if c and use_git:
+                        gitops.fetch_branch(cfg.repo_dir, f"farm/{c['id']}")
                 prompt = prompts.resume_prompt([c for c in children if c])
             if not session:
                 prompt = task["prompt"] + "\n\n---\n" + prompt
@@ -261,23 +268,24 @@ class Farm:
             while not keep.wait(max(20, cfg.lease_seconds // 3)):
                 store.renew_lease(tid, holder, cfg.lease_seconds)
                 store.renew_slot(slot, holder, cfg.lease_seconds)
-                store.heartbeat(cfg.farm_id, wid, "running", tid)
+                store.heartbeat(cfg.farm_id, wid, "running", tid, seat=self.seat)
 
         threading.Thread(target=renew, daemon=True).start()
-        before = store.get_snapshot()
+        before = store.get_snapshot(self.seat)
+        on_snap = lambda sn: store.put_snapshot(sn, self.seat)  # noqa: E731
         started = now()
         try:
             res = run_agent(build_cmd(cfg, sysprompt, session), prompt, cwd, env, cfg.task_timeout,
-                            on_snapshot=store.put_snapshot)
+                            on_snapshot=on_snap)
             if session and not res.ok and res.num_turns == 0 and "conversation" in res.text.lower():
                 # session file gone (e.g. new container): start fresh with full context
                 res = run_agent(build_cmd(cfg, sysprompt), task["prompt"] + "\n\n---\n" + prompt, cwd, env,
-                                cfg.task_timeout, on_snapshot=store.put_snapshot)
+                                cfg.task_timeout, on_snapshot=on_snap)
         finally:
             keep.set()
 
         after = res.snapshots[-1] if res.snapshots else None
-        store.add_spend(res.cost_usd)
+        store.add_spend(res.cost_usd, self.seat)
         store.add_run(tid, {
             "worker": holder, "started": started, "duration_s": round(res.duration_s, 1), "ok": res.ok,
             "cost_usd_list_price": res.cost_usd, "turns": res.num_turns, "terminal_reason": res.terminal_reason,
@@ -285,7 +293,7 @@ class Farm:
             "util_before": before.to_dict() if before else None, "util_after": after.to_dict() if after else None,
         })
         if res.session_id:
-            store.update_task(tid, session_id=res.session_id, cwd=cwd, branch=branch)
+            store.update_task(tid, session_id=res.session_id, cwd=cwd, branch=branch, home=cfg.farm_id, seat=self.seat)
 
         if res.rate_limited and not res.ok:
             # not the task's fault: give the attempt back and wait for the window
@@ -294,12 +302,12 @@ class Farm:
                 store.put_snapshot(Snapshot(observed_at=now(), status="rejected", rate_limit_type="unknown",
                                             resets_at=now() + 900,
                                             five_hour=after.five_hour if after else None,
-                                            seven_day=after.seven_day if after else None))
+                                            seven_day=after.seven_day if after else None), self.seat)
             store.update_task(tid, attempts=max(0, int(task.get("attempts", 1)) - 1))
             store.finish(tid, holder, False, "rate limited; re-queued", cfg.max_resumes)
             store.event("budget.rejected", "subscription rate limit hit; workers pause until reset", task=tid)
-            snap = store.get_snapshot()
-            self.notify("paused: usage limit", f"Claude reported a usage limit; all agents wait until "
+            snap = store.get_snapshot(self.seat)
+            self.notify(f"seat {self.seat} paused: usage limit", f"Claude reported a usage limit; this seat's agents wait until "
                         f"{iso(snap.resets_at) if snap and snap.resets_at else 'the reset'}.")
             return
 
@@ -362,11 +370,14 @@ class Farm:
         try:
             if more_to_do:
                 gitops.commit_leftovers(cwd, branch)
+                if cfg.push:
+                    gitops.push_branch(cfg.repo_dir, branch)  # sub-tasks on other boxes branch from it
                 return f"work kept on {branch}; sub-tasks branch from it and you merge them when resumed", "kept"
             if parent_branch:
                 gitops.commit_leftovers(cwd, branch)
                 n = gitops.ahead_of(cfg.repo_dir, branch, parent_branch)
-                return f"{n} commit(s) on {branch}, left for the parent task to merge", "kept"
+                shared = cfg.push and gitops.push_branch(cfg.repo_dir, branch)
+                return f"{n} commit(s) on {branch}, left for the parent task to merge" + ("; pushed" if shared else ""), "kept"
             if cfg.verify_cmd:
                 # check exactly what would land: the branch rebased onto current main
                 gitops.rebase_onto_main(cfg.repo_dir, cwd, branch)
@@ -378,6 +389,10 @@ class Farm:
             for d in self.descendants(task):  # their work is in main now, via this task
                 gitops.remove_worktree(cfg.repo_dir, os.path.join(os.path.dirname(cfg.repo_dir), ".worktrees", d),
                                        f"farm/{d}")
+                if cfg.push:
+                    gitops.delete_remote_branch(cfg.repo_dir, f"farm/{d}")
+            if cfg.push:
+                gitops.delete_remote_branch(cfg.repo_dir, branch)
             gitops.prune_merged(cfg.repo_dir)
             return out + ("; check passed" if cfg.verify_cmd else ""), "landed"
         except gitops.GitError as e:

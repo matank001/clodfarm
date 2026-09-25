@@ -91,16 +91,16 @@ def test_only_the_lease_holder_can_finish(store):
 
 
 def test_slots_are_global_and_capped(store):
-    assert store.acquire_slot("a", 2, 60) == 0
-    assert store.acquire_slot("b", 2, 60) == 1
+    assert store.acquire_slot("a", 2, 60) == "default#000"
+    assert store.acquire_slot("b", 2, 60) == "default#001"
     assert store.acquire_slot("c", 2, 60) is None
-    store.release_slot(0, "a")
-    assert store.acquire_slot("c", 2, 60) == 0
+    store.release_slot("default#000", "a")
+    assert store.acquire_slot("c", 2, 60) == "default#000"
 
 
 def test_expired_slot_can_be_taken(store):
     store.acquire_slot("dead", 1, -1)
-    assert store.acquire_slot("alive", 1, 60) == 0
+    assert store.acquire_slot("alive", 1, 60) == "default#000"
 
 
 def test_snapshot_keeps_only_the_newest(store):
@@ -145,3 +145,28 @@ def test_spend_accumulates_per_day(store):
     store.add_spend(1.25)
     store.add_spend(0.75)
     assert abs(store.spent_today() - 2.0) < 1e-9
+
+
+def test_each_seat_has_its_own_budget_and_slots(store):
+    t = now()
+    store.put_snapshot(Snapshot(observed_at=t, status="rejected", resets_at=t + 3600), "matan-1a2b")
+    store.put_snapshot(Snapshot(observed_at=t, five_hour=Window(0.2, t + 3600)), "gil-3c4d")
+    snaps = store.snapshots()
+    assert snaps["matan-1a2b"].status == "rejected" and snaps["gil-3c4d"].five_hour.utilization == 0.2
+    assert store.acquire_slot("m", 1, 60, "matan-1a2b") == "matan-1a2b#000"
+    assert store.acquire_slot("g", 1, 60, "gil-3c4d") == "gil-3c4d#000", "one seat's slots never block another's"
+    store.add_spend(3.0, "api-aaaaaa")
+    assert store.spent_today("api-aaaaaa") == 3.0 and store.spent_today("api-bbbbbb") == 0.0
+
+
+def test_resumed_task_waits_for_its_home_box(store):
+    t = store.add_task("parent", "x")
+    store.claim_next("boxA/w0", 60, "boxA")
+    store.update_task(t["id"], home="boxA")
+    store.add_task("kid", "x", parent=t["id"])
+    store.finish(t["id"], "boxA/w0", True, "split", 5)
+    kid = store.claim_next("boxB/w0", 60, "boxB")
+    store.finish(kid["id"], "boxB/w0", True, "kid done", 5)
+    assert store.get_task(t["id"])["status"] == "queued"
+    assert store.claim_next("boxB/w0", 60, "boxB") is None, "another box doesn't steal a resume within the affinity"
+    assert store.claim_next("boxA/w0", 60, "boxA")["id"] == t["id"]
