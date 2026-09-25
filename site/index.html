@@ -1,0 +1,218 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>clodfarm: a farm of Claude Code agents that paces itself</title>
+<meta name="description" content="clodfarm (say it out loud) runs a farm of Claude Code agents in one container. They split big jobs into sub-agents, check their work with your tests, and pace themselves on your account's real 5-hour and weekly limits. Open source, MIT.">
+<link rel="canonical" href="https://clod.farm/">
+<meta name="theme-color" content="#0A1030">
+<meta name="color-scheme" content="dark">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+
+<meta property="og:type" content="website">
+<meta property="og:site_name" content="clodfarm">
+<meta property="og:url" content="https://clod.farm/">
+<meta property="og:title" content="clodfarm: a farm of Claude Code agents">
+<meta property="og:description" content="Plant a mission tonight, harvest the work in the morning. Claude Code agents that split work into sub-agents, test it, and pace themselves on your real usage limits.">
+<meta property="og:image" content="https://clod.farm/og.png">
+<meta property="og:image:width" content="1280">
+<meta property="og:image:height" content="640">
+<meta property="og:image:alt" content="A night-time farm where glowing terminal sprouts are Claude Code agents, with a moon-shaped usage gauge">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="clodfarm: a farm of Claude Code agents">
+<meta name="twitter:description" content="Plant a mission tonight, harvest the work in the morning.">
+<meta name="twitter:image" content="https://clod.farm/og.png">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,400;12..96,600;12..96,800&family=JetBrains+Mono:wght@400;600&display=swap">
+<link rel="preload" href="/scene.svg" as="image" type="image/svg+xml">
+<link rel="stylesheet" href="/style.css">
+<script src="/copy.js" defer></script>
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "SoftwareApplication",
+  "name": "clodfarm",
+  "url": "https://clod.farm/",
+  "description": "Open-source tool that runs a farm of Claude Code agents in a container: a shared task queue, sub-agents that merge their work, a test gate before anything lands, Remote Control from the Claude app, and a budget governor that paces each account on its real 5-hour and weekly usage.",
+  "applicationCategory": "DeveloperApplication",
+  "operatingSystem": "Linux, macOS (Docker)",
+  "license": "https://opensource.org/licenses/MIT",
+  "softwareRequirements": "Docker, a Claude subscription or an Anthropic API key",
+  "codeRepository": "https://github.com/matank001/clodfarm",
+  "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}
+}
+</script>
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {"@type": "Question", "name": "What is clodfarm?",
+     "acceptedAnswer": {"@type": "Answer", "text": "An open-source program that runs Claude Code agents around the clock in a Docker container. You give it a mission or tasks; agents take work from a queue, split big jobs into sub-agents, run your tests, and land passing work on your repo. It paces itself on your Claude account's real 5-hour and weekly usage."}},
+    {"@type": "Question", "name": "Will it lock me out of my own Claude?",
+     "acceptedAnswer": {"@type": "Answer", "text": "By default the agents stop at 80% of the weekly window and 85% of any 5-hour window, using the usage numbers Claude Code itself reports, which include your own chats. When a limit is reached it waits for the reset."}},
+    {"@type": "Question", "name": "Is it allowed?",
+     "acceptedAnswer": {"@type": "Answer", "text": "It drives the official Claude Code CLI, headless mode and Remote Control as documented. On a subscription it is meant for your own projects on your own login. Anthropic's consumer terms forbid reselling or intermediating Claude usage, so use Team or Enterprise seats for people working together and an API key for commercial workloads. Read the terms yourself; this is not legal advice."}},
+    {"@type": "Question", "name": "What does it cost?",
+     "acceptedAnswer": {"@type": "Answer", "text": "clodfarm is free and MIT-licensed. On a subscription you pay nothing beyond your plan. One box needs no database. Running it on AWS costs whatever the instance costs."}},
+    {"@type": "Question", "name": "Is clodfarm made by Anthropic?",
+     "acceptedAnswer": {"@type": "Answer", "text": "No. It is an independent open-source project, not affiliated with or endorsed by Anthropic. Claude and Claude Code are trademarks of Anthropic, PBC."}}
+  ]
+}
+</script>
+</head>
+<body>
+<a class="skip" href="#main">Skip to content</a>
+
+<header class="hero">
+  <nav class="bar" aria-label="Main">
+    <a class="mark" href="/" aria-label="clodfarm home">clod<span>farm</span></a>
+    <a class="bar-link" href="https://github.com/matank001/clodfarm">GitHub</a>
+  </nav>
+
+  <div class="hero-copy">
+    <p class="say">clodfarm, say it out loud</p>
+    <h1>Plant a mission tonight. Harvest the work in the morning.</h1>
+    <p class="lede">A farm of Claude Code agents in one container. They split big jobs into sub-agents, check their work with
+      your tests, and pace themselves on your account's real usage limits, so there's always room left for you.</p>
+
+    <div class="install">
+      <label class="sr-only" for="cmd">Install command</label>
+      <code id="cmd">curl -fsSL https://raw.githubusercontent.com/matank001/clodfarm/main/scripts/install.sh | sh</code>
+      <button class="copy" type="button" data-copy="#cmd" aria-live="polite">Copy</button>
+    </div>
+    <p class="after">Needs Docker. It starts the container, then asks you to log in: open the link on any device, paste the code back.</p>
+
+    <div class="actions">
+      <a class="btn btn-moon" href="https://github.com/matank001/clodfarm">View on GitHub</a>
+      <a class="btn btn-ghost" href="https://github.com/matank001/clodfarm/tree/main/docs">Read the docs</a>
+    </div>
+  </div>
+</header>
+
+<main id="main">
+
+  <section class="season" aria-labelledby="season-h">
+    <h2 id="season-h">A season on the farm</h2>
+    <ol class="steps">
+      <li>
+        <h3>Plant</h3>
+        <p>Give it a mission, queue tasks, or just talk to it from the Claude app.</p>
+        <pre><code>clodfarm mission "Build a CSV to Markdown CLI, with tests"</code></pre>
+      </li>
+      <li>
+        <h3>Sprout</h3>
+        <p>Workers take tasks from the queue. Each one runs Claude Code in its own git worktree, so agents never step on
+          each other.</p>
+      </li>
+      <li>
+        <h3>Split</h3>
+        <p>Big jobs fan out into sub-agents. When they finish, the parent picks up in its own conversation and merges
+          their branches.</p>
+      </li>
+      <li>
+        <h3>Harvest</h3>
+        <p>Your check runs on the finished work. Only work that passes lands on your repo; a failing check sends the agent
+          back to fix it.</p>
+      </li>
+    </ol>
+  </section>
+
+  <section class="moon" aria-labelledby="moon-h">
+    <div class="moon-text">
+      <h2 id="moon-h">Paced by the moon</h2>
+      <p>Every agent run reports your account's actual 5-hour and weekly usage, straight from Claude Code. The farm reads
+        those numbers, not guesses.</p>
+      <ul class="plain">
+        <li>Agents stop at 80% of the week and 85% of any 5-hour window. The rest is yours.</li>
+        <li>The numbers include your own chats, so the farm backs off while you work.</li>
+        <li>Hit a limit and it sleeps until the reset, then carries on by itself.</li>
+        <li>It never draws on paid overage unless you allow it. With an API key, it keeps to a daily dollar cap instead.</li>
+      </ul>
+    </div>
+    <figure class="gauge" aria-hidden="true">
+      <svg viewBox="0 0 240 240" width="240" height="240">
+        <circle cx="120" cy="120" r="104" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="10"/>
+        <circle cx="120" cy="120" r="104" fill="none" stroke="#F2C14E" stroke-width="10" stroke-linecap="round"
+                stroke-dasharray="523 654" transform="rotate(-90 120 120)"/>
+        <circle cx="120" cy="120" r="84" fill="none" stroke="rgba(255,255,255,.1)" stroke-width="10"/>
+        <circle cx="120" cy="120" r="84" fill="none" stroke="#E8875B" stroke-width="10" stroke-linecap="round"
+                stroke-dasharray="449 528" transform="rotate(-90 120 120)"/>
+        <circle cx="120" cy="120" r="60" fill="#F3E3C7"/>
+        <circle cx="104" cy="108" r="9" fill="#E4CFAE"/><circle cx="136" cy="136" r="6" fill="#E4CFAE"/>
+      </svg>
+      <figcaption>Outer ring: the week, stopped at 80%. Inner ring: the 5-hour window, stopped at 85%.</figcaption>
+    </figure>
+  </section>
+
+  <section class="barn" aria-labelledby="barn-h">
+    <h2 id="barn-h">What's in the barn</h2>
+    <ul class="rows">
+      <li><h3>Steer it from your phone</h3><p>Remote Control stays connected, so the farm is a session in the Claude app and at claude.ai/code.</p></li>
+      <li><h3>Nothing lands untested</h3><p>Set your test command once. Finished work is checked before it reaches your repo.</p></li>
+      <li><h3>Survives restarts</h3><p>Crashed runs are retried, timed-out runs continue where they stopped, and a restarting box hands its tasks back at once.</p></li>
+      <li><h3>Tells you when it matters</h3><p>Notifications to ntfy, Slack or Discord when a task fails, the farm pauses, or there's nothing left to do.</p></li>
+      <li><h3>No dashboard to babysit</h3><p>The Claude app, one command line tool and the logs are the whole interface.</p></li>
+    </ul>
+  </section>
+
+  <section class="scale" aria-labelledby="scale-h">
+    <h2 id="scale-h">One box, or a whole farm</h2>
+    <div class="split">
+      <div>
+        <h3>One box</h3>
+        <p>One container on your machine or any server. Its state lives in a small file inside it, so there's no database
+          to run. On AWS, one command deploys it with no open ports.</p>
+      </div>
+      <div>
+        <h3>A whole farm</h3>
+        <p>Point more boxes at one shared table, on your account or a teammate's own seat. They share one queue and one
+          repo, and each account is paced on its own budget, so when one hits its limit the others keep working.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="faq" aria-labelledby="faq-h">
+    <h2 id="faq-h">Questions</h2>
+    <details>
+      <summary>Is this allowed?</summary>
+      <p>It drives the official Claude Code CLI, headless mode and Remote Control as documented. On a subscription it's
+        meant for your own projects, on your own login. Anthropic's consumer terms forbid reselling or intermediating
+        Claude usage: use Team or Enterprise seats for people working together, and an API key for commercial workloads.
+        Read the <a href="https://www.anthropic.com/legal/consumer-terms">Consumer Terms</a> yourself; this isn't legal advice.</p>
+    </details>
+    <details>
+      <summary>Will it lock me out of my own Claude?</summary>
+      <p>That's what the pacing is for. By default the agents stop at 80% of your week and 85% of any 5-hour window, and
+        the numbers include your own use.</p>
+    </details>
+    <details>
+      <summary>What does it cost?</summary>
+      <p>clodfarm is free and MIT-licensed. On a subscription you pay nothing beyond your plan. One box needs no database;
+        on AWS you pay for the instance.</p>
+    </details>
+    <details>
+      <summary>Is it safe to give agents a shell?</summary>
+      <p>They run as an unprivileged user inside the container. Mount only what they may change, give git a key for one
+        repo, and read the <a href="https://github.com/matank001/clodfarm/blob/main/docs/security.md">security notes</a>:
+        a prompt is not a security boundary.</p>
+    </details>
+    <details>
+      <summary>Is clodfarm made by Anthropic?</summary>
+      <p>No. It's an independent open-source project, not affiliated with or endorsed by Anthropic.</p>
+    </details>
+  </section>
+
+</main>
+
+<footer class="foot">
+  <p><a class="mark" href="/">clod<span>farm</span></a> is open source under the MIT license, and the first open piece of
+    Pluribus, an experiment in running a small company with Claude agents.</p>
+  <p class="fine">Not affiliated with or endorsed by Anthropic. Claude and Claude Code are trademarks of Anthropic, PBC.</p>
+</footer>
+</body>
+</html>
