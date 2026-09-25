@@ -1,0 +1,36 @@
+# Local, zero-AWS setup:   cp .env.example .env && docker compose up -d
+# Then log in:             docker exec -it claude-farm claude-farm login
+# Real DynamoDB instead:   in .env remove COMPOSE_PROFILES=local, set FARM_DYNAMODB_ENDPOINT= (empty) and give it AWS credentials
+name: claude-farm
+
+services:
+  claude-farm:
+    build: .
+    image: ghcr.io/matank001/claude-farm:latest
+    container_name: claude-farm
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      FARM_DYNAMODB_ENDPOINT: ${FARM_DYNAMODB_ENDPOINT-http://dynamodb:8000}
+      FARM_CONTAINER_NAME: claude-farm
+    volumes:
+      - claude-home:/home/farm/.claude   # your login and Claude Code state
+      - workspace:/workspace             # the repo the agents work in
+    stop_grace_period: 30s
+
+  # Bundled DynamoDB Local, on when COMPOSE_PROFILES=local (the default in .env.example).
+  dynamodb:
+    profiles: ["local"]
+    image: amazon/dynamodb-local:latest
+    container_name: claude-farm-dynamodb
+    restart: unless-stopped
+    user: root
+    working_dir: /home/dynamodblocal
+    command: "-jar DynamoDBLocal.jar -sharedDb -dbPath ./data"
+    volumes:
+      - dynamodb:/home/dynamodblocal/data
+
+volumes:
+  claude-home:
+  workspace:
+  dynamodb:

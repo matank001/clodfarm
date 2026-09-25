@@ -1,0 +1,190 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >-
+  claude-farm - always-on Claude Code agents on your Claude subscription. One EC2 box (arm64, no inbound ports,
+  reached through SSM Session Manager) running the claude-farm container, and a DynamoDB table for the task queue
+  and the shared budget. Log in afterwards with deploy/aws/deploy.sh login.
+
+Parameters:
+  InstanceType:
+    Type: String
+    Default: t4g.medium
+    Description: arm64 (Graviton). t4g.medium (4 GB) runs 3 agents plus Remote Control comfortably; t4g.large for 6+.
+  VolumeSize:
+    Type: Number
+    Default: 30
+    MinValue: 16
+  RepoUrl:
+    Type: String
+    Default: https://github.com/matank001/claude-farm.git
+    Description: Where the box gets claude-farm from (built on the box).
+  RepoRef:
+    Type: String
+    Default: main
+  SourceTarball:
+    Type: String
+    Default: ""
+    Description: Optional https URL of a .tar.gz of this repo (e.g. a fork or a pre-signed S3 link); used instead of RepoUrl.
+  WorkspaceRepo:
+    Type: String
+    Default: ""
+    Description: Optional git URL the agents work in (cloned to /workspace/repo). Empty = a fresh local repo.
+  MaxWorkers:
+    Type: Number
+    Default: 3
+  Model:
+    Type: String
+    Default: opus
+  TableName:
+    Type: String
+    Default: ""
+    Description: Share one table between stacks to share one budget. Empty = <stack name>.
+  AmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Default: /aws/service/canonical/ubuntu/server/24.04/stable/current/arm64/hvm/ebs-gp3/ami-id
+
+Conditions:
+  OwnTable: !Equals [!Ref TableName, ""]
+
+Resources:
+  Vpc:
+    Type: AWS::EC2::VPC
+    Properties:
+      CidrBlock: 10.77.0.0/24
+      EnableDnsHostnames: true
+      EnableDnsSupport: true
+      Tags: [{Key: Name, Value: !Ref AWS::StackName}]
+  Igw:
+    Type: AWS::EC2::InternetGateway
+  IgwAttach:
+    Type: AWS::EC2::VPCGatewayAttachment
+    Properties: {VpcId: !Ref Vpc, InternetGatewayId: !Ref Igw}
+  Subnet:
+    Type: AWS::EC2::Subnet
+    Properties:
+      VpcId: !Ref Vpc
+      CidrBlock: 10.77.0.0/25
+      MapPublicIpOnLaunch: true
+      AvailabilityZone: !Select [0, !GetAZs ""]
+      Tags: [{Key: Name, Value: !Ref AWS::StackName}]
+  RouteTable:
+    Type: AWS::EC2::RouteTable
+    Properties: {VpcId: !Ref Vpc}
+  DefaultRoute:
+    Type: AWS::EC2::Route
+    DependsOn: IgwAttach
+    Properties: {RouteTableId: !Ref RouteTable, DestinationCidrBlock: 0.0.0.0/0, GatewayId: !Ref Igw}
+  SubnetRoutes:
+    Type: AWS::EC2::SubnetRouteTableAssociation
+    Properties: {SubnetId: !Ref Subnet, RouteTableId: !Ref RouteTable}
+  NoInbound:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: claude-farm - no inbound; Remote Control, the Claude API and SSM are all outbound HTTPS
+      VpcId: !Ref Vpc
+      SecurityGroupEgress: [{IpProtocol: "-1", CidrIp: 0.0.0.0/0}]
+
+  Table:
+    Type: AWS::DynamoDB::Table
+    Condition: OwnTable
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      TableName: !Ref AWS::StackName
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - {AttributeName: PK, AttributeType: S}
+        - {AttributeName: SK, AttributeType: S}
+        - {AttributeName: GSI1PK, AttributeType: S}
+        - {AttributeName: GSI1SK, AttributeType: S}
+      KeySchema: [{AttributeName: PK, KeyType: HASH}, {AttributeName: SK, KeyType: RANGE}]
+      GlobalSecondaryIndexes:
+        - IndexName: GSI1
+          KeySchema: [{AttributeName: GSI1PK, KeyType: HASH}, {AttributeName: GSI1SK, KeyType: RANGE}]
+          Projection: {ProjectionType: ALL}
+      TimeToLiveSpecification: {AttributeName: expires_at, Enabled: true}
+      PointInTimeRecoverySpecification: {PointInTimeRecoveryEnabled: true}
+      SSESpecification: {SSEEnabled: true}
+
+  Role:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement: [{Effect: Allow, Principal: {Service: ec2.amazonaws.com}, Action: sts:AssumeRole}]
+      ManagedPolicyArns: [arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore]
+      Policies:
+        - PolicyName: claude-farm-table
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: [dynamodb:GetItem, dynamodb:PutItem, dynamodb:UpdateItem, dynamodb:DeleteItem, dynamodb:Query, dynamodb:DescribeTable]
+                Resource:
+                  - !Sub
+                    - arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${T}
+                    - {T: !If [OwnTable, !Ref AWS::StackName, !Ref TableName]}
+                  - !Sub
+                    - arn:${AWS::Partition}:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${T}/index/*
+                    - {T: !If [OwnTable, !Ref AWS::StackName, !Ref TableName]}
+  Profile:
+    Type: AWS::IAM::InstanceProfile
+    Properties: {Roles: [!Ref Role]}
+
+  Instance:
+    Type: AWS::EC2::Instance
+    DependsOn: DefaultRoute
+    Properties:
+      ImageId: !Ref AmiId
+      InstanceType: !Ref InstanceType
+      IamInstanceProfile: !Ref Profile
+      SubnetId: !Ref Subnet
+      SecurityGroupIds: [!Ref NoInbound]
+      MetadataOptions: {HttpTokens: required, HttpPutResponseHopLimit: 2}  # 2 hops so the container reaches the role
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs: {VolumeSize: !Ref VolumeSize, VolumeType: gp3, Encrypted: true}
+      Tags: [{Key: Name, Value: !Ref AWS::StackName}]
+      UserData:
+        Fn::Base64: !Sub
+          - |
+            #!/bin/bash
+            set -euxo pipefail
+            exec > >(tee /var/log/claude-farm-setup.log) 2>&1
+            export DEBIAN_FRONTEND=noninteractive
+            apt-get update
+            apt-get install -y docker.io docker-compose-v2 git
+            systemctl enable --now docker
+            fallocate -l 4G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && echo '/swapfile none swap sw 0 0' >> /etc/fstab
+            mkdir -p /opt/claude-farm
+            if [ ! -f /opt/claude-farm/docker-compose.yml ]; then
+              if [ -n "${SourceTarball}" ]; then
+                curl -fsSL "${SourceTarball}" | tar xz -C /opt/claude-farm --strip-components=1
+              else
+                git clone --depth 1 --branch ${RepoRef} ${RepoUrl} /opt/claude-farm
+              fi
+            fi
+            cat > /opt/claude-farm/.env <<EOF
+            AWS_REGION=${AWS::Region}
+            FARM_TABLE=${Tbl}
+            FARM_DYNAMODB_ENDPOINT=
+            FARM_NAME=${AWS::StackName}
+            FARM_MODEL=${Model}
+            FARM_MAX_WORKERS=${MaxWorkers}
+            FARM_REPO_URL=${WorkspaceRepo}
+            EOF
+            sed -i 's/^ *//' /opt/claude-farm/.env
+            if [ -f /opt/claude-farm/docker-compose.yml ]; then
+              cd /opt/claude-farm && docker compose up -d --build
+            fi
+          - {Tbl: !If [OwnTable, !Ref AWS::StackName, !Ref TableName]}
+
+Outputs:
+  InstanceId:
+    Value: !Ref Instance
+  Table:
+    Value: !If [OwnTable, !Ref AWS::StackName, !Ref TableName]
+  Login:
+    Description: Log in to your Claude subscription (needs the AWS CLI and the Session Manager plugin)
+    Value: !Sub "aws ssm start-session --region ${AWS::Region} --target ${Instance} --document-name AWS-StartInteractiveCommand --parameters command='sudo docker exec -it claude-farm claude-farm login'"
+  Status:
+    Value: !Sub "aws ssm start-session --region ${AWS::Region} --target ${Instance} --document-name AWS-StartInteractiveCommand --parameters command='sudo docker exec -it claude-farm claude-farm status'"

@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "claude-farm"
+dynamic = ["version"]
+description = "Always-on Claude Code agents in a container, on your Claude subscription, with a shared budget governor."
+readme = "README.md"
+license = {text = "MIT"}
+requires-python = ">=3.10"
+dependencies = ["boto3>=1.28"]
+classifiers = [
+  "License :: OSI Approved :: MIT License",
+  "Programming Language :: Python :: 3",
+  "Operating System :: POSIX :: Linux",
+  "Topic :: Software Development",
+]
+
+[project.optional-dependencies]
+test = ["pytest>=7", "moto[dynamodb,server]>=5"]
+
+[project.scripts]
+claude-farm = "claude_farm.cli:main"
+
+[project.urls]
+Homepage = "https://github.com/matank001/claude-farm"
+
+[tool.setuptools]
+packages = ["claude_farm"]
+
+[tool.setuptools.dynamic]
+version = {attr = "claude_farm.__version__"}
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
