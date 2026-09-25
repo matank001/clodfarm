@@ -174,7 +174,8 @@ Resources:
             EOF
             sed -i 's/^ *//' /opt/clodfarm/.env
             if [ -f /opt/clodfarm/docker-compose.yml ]; then
-              cd /opt/clodfarm && docker compose up -d --build
+              # run the released image; build from source only if it can't be pulled (forks, offline)
+              cd /opt/clodfarm && (docker compose pull -q && docker compose up -d) || docker compose up -d --build
             fi
           - {Tbl: !If [OwnTable, !Ref AWS::StackName, !Ref TableName]}
 

@@ -24,7 +24,7 @@ on_box() {  # run a command in an interactive SSM session on the instance
 }
 wait_ready() {
   local id; id=$(out InstanceId)
-  echo "waiting for $id to finish setup (Docker build takes 3-6 minutes)..."
+  echo "waiting for $id to finish setup (usually 2-4 minutes)..."
   for _ in $(seq 1 90); do
     local cid st
     cid=$(aws ssm send-command --region "$REGION" --instance-ids "$id" --document-name AWS-RunShellScript \
