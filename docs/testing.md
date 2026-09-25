@@ -74,3 +74,22 @@ The task: write `strutil.slugify` yourself, delegate `truncate` to exactly one s
   - before this fix it waited for its 5-minute lease.
 - **Zero-config image** (locally, no `.env`, no database): `doctor` showed `farm store: sqlite
   /workspace/.farm/farm.db` and the login banner.
+
+**2026-09-25, public end-to-end test before launch** (AWS t4g.medium arm64; the public installer and the public image
+`ghcr.io/matank001/clodfarm`, nothing from the local checkout):
+- **v0.1.0, found a launch blocker.** The farm was installed right after the account's weekly reset, with normal use
+  elsewhere on the account (8% of the week, 44% of the 5-hour window). Weekly pacing then allowed **0 agents**, so
+  a fresh install did nothing.
+  - Fixed in 0.1.1: pacing never drops below `FARM_MIN_WORKERS` (1). Only hard limits stop the farm.
+  - Two regression tests added.
+  - The same test showed the installer couldn't pass settings; it now forwards every `FARM_*` variable.
+- **v0.1.1, passed:**
+  - `curl … | FARM_VERIFY_CMD=… sh` pulled the arm64 image, reused the login, and passed the settings through.
+  - The governor showed "1/3 allowed … (keeping 1 agent working)", and Remote Control was live.
+  - The parent task wrote slugify, committed, spawned one sub-agent, and waited.
+  - **The container was restarted mid-run.** The stopping box logged `task.restart`, and the sub-task was
+    re-claimed within seconds and finished.
+  - The parent resumed in its own session and merged the child's branch. `verify.passed` ran the unit tests, and
+    2 commits merged onto main.
+  - The agents wrote 18 unit tests, all passing.
+  - Runs took 25 s and 13 s.
