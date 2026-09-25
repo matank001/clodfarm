@@ -234,7 +234,8 @@ class Store:
             "resume": True, "resume_reason": reason, "resume_note": note[-6000:],
             "attempts": max(0, int(task.get("attempts", 1)) - 1), counter: int(task.get(counter, 0)) + 1})
         if ok:
-            what = "fix the failing check" if reason == "verify" else "continue after a timeout"
+            what = {"verify": "fix the failing check", "timeout": "continue after a timeout",
+                    "restart": "continue after its box restarted"}.get(reason, reason)
             self.event(f"task.{reason}", f"{tid}: resuming to {what}", task=tid)
         return ok
 

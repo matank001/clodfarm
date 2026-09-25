@@ -47,7 +47,7 @@ def build_cmd(cfg, system_prompt: str, resume_session: str | None = None) -> lis
 
 
 def run_agent(cmd: list[str], prompt: str, cwd: str, env: dict, timeout: int,
-              on_snapshot=None, on_line=None) -> RunResult:
+              on_snapshot=None, on_line=None, on_start=None) -> RunResult:
     """Start claude, feed the prompt on stdin, and parse events as they stream.
 
     The prompt goes on stdin, not argv: some flags are variadic and would swallow it,
@@ -56,6 +56,8 @@ def run_agent(cmd: list[str], prompt: str, cwd: str, env: dict, timeout: int,
     t0 = time.time()
     proc = subprocess.Popen(cmd, cwd=cwd, env=env, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
                             stderr=subprocess.PIPE, text=True, bufsize=1, start_new_session=True)
+    if on_start:
+        on_start(proc)
     killer = threading.Timer(timeout, lambda: _kill(proc))
     killer.start()
     stderr_tail: list[str] = []

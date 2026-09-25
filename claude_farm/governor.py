@@ -132,6 +132,12 @@ def _live(w: Window | None, now: float) -> Window | None:
     return w
 
 
+def _allowed(w: Window, length: float, target: float, band: float, now: float) -> float:
+    """Where the pace line is right now: the share of the window the agents may have used by this point."""
+    elapsed = min(max(1.0 - (w.resets_at - now) / length, 0.0), 1.0)
+    return min(target, target * elapsed + band)
+
+
 def _pace(w: Window, length: float, target: float, band: float, now: float):
     """Return (fraction of full speed 0..1, time when fraction becomes > 0).
 
@@ -205,7 +211,8 @@ def decide(snap: Snapshot | None, policy: Policy, now: float, spent_today: float
             f, r = _pace(seven, SEVEN_DAYS, policy.weekly_target, policy.weekly_band, now)
             details["weekly_pace"] = round(f, 3)
             if f < 1:
-                reasons.append(f"ahead of weekly pace ({seven.utilization:.0%} used)")
+                reasons.append(f"pacing the week: {seven.utilization:.0%} used, "
+                               f"{_allowed(seven, SEVEN_DAYS, policy.weekly_target, policy.weekly_band, now):.0%} allowed so far")
             frac = min(frac, f)
             if r:
                 resume.append(r)
@@ -213,7 +220,8 @@ def decide(snap: Snapshot | None, policy: Policy, now: float, spent_today: float
         f, r = _pace(five, FIVE_HOURS, policy.five_hour_ceiling, policy.five_hour_band, now)
         details["five_hour_pace"] = round(f, 3)
         if f < 1:
-            reasons.append(f"ahead of 5-hour pace ({five.utilization:.0%} used)")
+            reasons.append(f"pacing the 5-hour window: {five.utilization:.0%} used, "
+                           f"{_allowed(five, FIVE_HOURS, policy.five_hour_ceiling, policy.five_hour_band, now):.0%} allowed so far")
         frac = min(frac, f)
         if r:
             resume.append(r)

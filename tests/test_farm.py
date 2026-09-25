@@ -262,3 +262,14 @@ def test_mission_from_env_and_from_the_cli(env, monkeypatch):
         assert "Write two files." in cli("mission").stdout
     finally:
         stop_farm(farm, t)
+
+
+def test_stopping_a_box_hands_its_running_task_back_at_once(env):
+    farm, t = start_farm()
+    tid = json.loads(cli("task", "add", "long", "--prompt", "SLOW 30 COMMIT long", "--json").stdout)["id"]
+    wait_for(lambda: farm.store.get_task(tid)["status"] == "running")
+    stop_farm(farm, t)
+    task = farm.store.get_task(tid)
+    assert task["status"] == "queued" and task["resume_reason"] == "restart", task
+    assert int(task["attempts"]) == 0, "a restart doesn't cost an attempt"
+    assert farm.store.slots() == [], "its slots are free immediately"

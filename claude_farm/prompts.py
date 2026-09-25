@@ -99,6 +99,11 @@ def timeout_prompt(seconds: int) -> str:
             "too big for one run, split the rest into sub-tasks with `claude-farm task add --parent $FARM_TASK_ID` and end.")
 
 
+def restart_prompt() -> str:
+    return ("Your previous run was interrupted because the farm's box restarted. This is the same session: look at "
+            "what you already did (`git status`, `git log`), then continue and finish the task.")
+
+
 def resume_prompt(children: list[dict]) -> str:
     lines = []
     for c in children:

@@ -94,6 +94,9 @@ class Farm:
         raise SystemExit(0)
 
     def shutdown(self):
+        """Stop cleanly: end the agents, hand this box's running tasks back to the queue (their attempt is given back)
+        and free its slots right away, so another box, or this one after a restart, continues without waiting for
+        leases to expire."""
         print("stopping: handing running tasks back to the queue", flush=True)
         for p in list(self.procs.values()):
             try:
@@ -101,6 +104,16 @@ class Farm:
             except (ProcessLookupError, PermissionError):
                 pass
         time.sleep(3)
+        mine = f"{self.cfg.farm_id}/"
+        try:
+            for t in self.store.list_tasks("running", 200):
+                if str(t.get("worker", "")).startswith(mine):
+                    self.store.requeue_resume(t["id"], t["worker"], "restart", "", "restarts")
+            for s in self.store.slots():
+                if str(s.get("holder", "")).startswith(mine):
+                    self.store.release_slot(s["SK"], s["holder"])
+        except Exception as e:  # noqa: BLE001 - leases expire on their own if the store is unreachable
+            print(f"could not hand tasks back ({e!r}); their leases will expire", flush=True)
         self.store.event("farm.stopped", self.cfg.farm_id)
 
     def wait_for_auth(self):
@@ -249,6 +262,8 @@ class Farm:
                 prompt = prompts.verify_prompt(cfg.verify_cmd, task.get("resume_note") or "")
             elif reason == "timeout":
                 prompt = prompts.timeout_prompt(cfg.task_timeout)
+            elif reason == "restart":
+                prompt = prompts.restart_prompt()
             else:
                 children = [store.get_task(c) for c in task.get("children", [])]
                 for c in children:  # a child may have run on another box: get its branch from origin
@@ -279,13 +294,16 @@ class Farm:
         started = now()
         try:
             res = run_agent(build_cmd(cfg, sysprompt, session), prompt, cwd, env, cfg.task_timeout,
-                            on_snapshot=on_snap)
+                            on_snapshot=on_snap, on_start=lambda p: self.procs.__setitem__(tid, p))
             if session and not res.ok and res.num_turns == 0 and "conversation" in res.text.lower():
                 # session file gone (e.g. new container): start fresh with full context
                 res = run_agent(build_cmd(cfg, sysprompt), task["prompt"] + "\n\n---\n" + prompt, cwd, env,
-                                cfg.task_timeout, on_snapshot=on_snap)
+                                cfg.task_timeout, on_snapshot=on_snap, on_start=lambda p: self.procs.__setitem__(tid, p))
         finally:
             keep.set()
+            self.procs.pop(tid, None)
+        if self.stop.is_set():
+            return  # stopping: shutdown() hands this task back to the queue
 
         after = res.snapshots[-1] if res.snapshots else None
         store.add_spend(res.cost_usd, self.seat)
