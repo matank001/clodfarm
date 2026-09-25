@@ -2,6 +2,9 @@
 
 ## 0.1.1 (2026-09-25)
 
+- The container's hostname is the farm's name, so the Claude app lists the device as `clodfarm` (or your
+  `FARM_NAME`) instead of a random container id.
+
 - Pacing slows the farm but never stops it: at least `FARM_MIN_WORKERS` (1) agent keeps working unless a hard limit
   applies (5-hour ceiling, weekly target, rejection, paid overage). Found in the public end-to-end test, where a week
   that had just reset froze a fresh install at 0 agents.

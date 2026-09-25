@@ -8,6 +8,7 @@ services:
     image: ghcr.io/matank001/clodfarm:latest
     build: .
     container_name: clodfarm
+    hostname: ${FARM_NAME:-clodfarm}   # the device name shown in the Claude app
     restart: unless-stopped
     env_file:
       - path: .env

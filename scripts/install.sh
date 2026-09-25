@@ -19,7 +19,7 @@ else
   say "Starting $NAME (restarts on reboot; your login and work live in Docker volumes)"
   # pass every FARM_* setting from your shell through (FARM_VERIFY_CMD, FARM_MAX_WORKERS, FARM_NOTIFY_URL, ...)
   for v in $(env | sed -n 's/^\(FARM_[A-Z0-9_]*\)=.*/\1/p'); do set -- "$@" -e "$v"; done
-  docker run -d --name "$NAME" --restart unless-stopped "$@" \
+  docker run -d --name "$NAME" --hostname "${FARM_NAME:-$NAME}" --restart unless-stopped "$@" \
     -e FARM_CONTAINER_NAME="$NAME" \
     -v clodfarm_claude-home:/home/farm/.claude -v clodfarm_workspace:/workspace \
     "$IMAGE" >/dev/null
