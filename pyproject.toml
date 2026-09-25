@@ -5,16 +5,29 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "claude-farm"
 dynamic = ["version"]
-description = "Always-on Claude Code agents in a container, on your Claude subscription, with a shared budget governor."
+description = "Always-on Claude Code agents in a container: Remote Control, sub-agents, a shared queue, and a budget governor that paces each account on its real 5-hour and weekly usage."
 readme = "README.md"
 license = {text = "MIT"}
 requires-python = ">=3.10"
+authors = [{name = "Matan Kotick"}]
+keywords = ["claude", "claude-code", "ai-agents", "autonomous-agents", "multi-agent", "agent-orchestration",
+            "remote-control", "subagents", "rate-limit", "budget", "dynamodb", "docker", "devops", "llm"]
 dependencies = ["boto3>=1.28"]
 classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Environment :: Console",
+  "Intended Audience :: Developers",
   "License :: OSI Approved :: MIT License",
-  "Programming Language :: Python :: 3",
   "Operating System :: POSIX :: Linux",
+  "Operating System :: MacOS",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.10",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Topic :: Software Development",
+  "Topic :: Software Development :: Build Tools",
+  "Topic :: Scientific/Engineering :: Artificial Intelligence",
 ]
 
 [project.optional-dependencies]
@@ -25,6 +38,9 @@ claude-farm = "claude_farm.cli:main"
 
 [project.urls]
 Homepage = "https://github.com/matank001/claude-farm"
+Documentation = "https://github.com/matank001/claude-farm/tree/main/docs"
+Issues = "https://github.com/matank001/claude-farm/issues"
+Changelog = "https://github.com/matank001/claude-farm/blob/main/CHANGELOG.md"
 
 [tool.setuptools]
 packages = ["claude_farm"]

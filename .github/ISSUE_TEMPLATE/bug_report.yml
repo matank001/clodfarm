@@ -1,0 +1,33 @@
+name: Bug report
+description: Something in claude-farm doesn't work as documented
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: "Thanks! Please don't paste tokens, `.credentials.json`, `.env` values or AWS keys."
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+    validations: {required: true}
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. docker compose up -d\n2. claude-farm task add ...\n3. ..."
+    validations: {required: true}
+  - type: textarea
+    id: logs
+    attributes:
+      label: Output of `claude-farm doctor` and the relevant part of `claude-farm events`
+      render: text
+  - type: input
+    id: versions
+    attributes:
+      label: Versions
+      placeholder: "claude-farm 0.1.0, Claude Code 2.1.x, Docker 28, AWS / local"
+  - type: dropdown
+    id: auth
+    attributes:
+      label: How is the box logged in?
+      options: [claude-farm login (subscription), setup-token, mounted profile, API key]

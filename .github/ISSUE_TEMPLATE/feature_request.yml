@@ -1,0 +1,20 @@
+name: Feature request
+description: An idea to make the farm better
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do, and what gets in the way?
+    validations: {required: true}
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help?
+  - type: checkboxes
+    id: principles
+    attributes:
+      label: Fits the project's principles
+      options:
+        - label: It stays inside Claude's usage limits and terms (no account pooling, rotation or limit evasion)
+          required: true

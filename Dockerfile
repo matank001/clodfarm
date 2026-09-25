@@ -1,6 +1,10 @@
 # claude-farm: always-on Claude Code agents. Runs as the non-root user "farm";
 # the container itself is the sandbox the agents work in.
 FROM debian:bookworm-slim
+LABEL org.opencontainers.image.title="claude-farm" \
+      org.opencontainers.image.description="Always-on Claude Code agents with Remote Control, sub-agents and a per-account budget governor" \
+      org.opencontainers.image.source="https://github.com/matank001/claude-farm" \
+      org.opencontainers.image.licenses="MIT"
 
 ARG CLAUDE_VERSION=stable
 ENV DEBIAN_FRONTEND=noninteractive \

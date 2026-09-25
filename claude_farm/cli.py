@@ -55,6 +55,11 @@ def _pct(x) -> str:
     return "-" if x is None else f"{x:.0%}"
 
 
+def _bar(frac, width: int = 10) -> str:
+    n = max(0, min(width, round((frac or 0) * width)))
+    return "█" * n + "░" * (width - n)
+
+
 def _out(obj, as_json: bool, text: str):
     print(json.dumps(obj, indent=1, default=str) if as_json else text)
 
@@ -116,9 +121,11 @@ def _seat_text(r) -> str:
     else:
         for name, w, cap in (("5-hour", snap.five_hour, p.five_hour_ceiling), ("7-day", snap.seven_day, p.weekly_target)):
             if w:
-                lines.append(f"  {name:<7} {_pct(w.utilization):>5} used   limit for agents {cap:.0%}   resets {_until(w.resets_at)}")
-        lines.append(f"  status  {snap.status}{'  (paid overage in use)' if snap.using_overage else ''}   measured {_ago(snap.observed_at)} ago")
-    lines.append(f"  governor: {d.workers}/{p.max_workers} agents allowed now, {len(r['slots'])} running: {d.reason}")
+                lines.append(f"  {name:<7}{_bar(w.utilization)} {_pct(w.utilization):>4}  agents stop at {cap:.0%}   resets {_until(w.resets_at)}")
+        if snap.status != "allowed" or snap.using_overage:
+            lines.append(f"  status  {snap.status}{'  (paid overage in use)' if snap.using_overage else ''}")
+        lines.append(f"  measured {_ago(snap.observed_at)} ago")
+    lines.append(f"  governor {d.workers}/{p.max_workers} allowed · {len(r['slots'])} running · {d.reason}")
     if d.pause_until:
         lines.append(f"  next check {_until(d.pause_until)}")
     return "\n".join(lines)
