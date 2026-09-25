@@ -93,3 +93,11 @@ The task: write `strutil.slugify` yourself, delegate `truncate` to exactly one s
     2 commits merged onto main.
   - The agents wrote 18 unit tests, all passing.
   - Runs took 25 s and 13 s.
+
+**2026-09-25, fresh AWS deploy from the public repo (v0.1.1):**
+- `deploy/aws/deploy.sh up` created a new stack (VPC, t4g.medium, its own DynamoDB table, IAM) in **4 min 10 s**. The
+  box cloned the public repo, pulled the released image, and showed the login banner.
+- `deploy/aws/deploy.sh login`: the owner opened the URL, approved and pasted the code. The farm noticed the login by
+  itself, started, and Remote Control connected.
+- One real task landed a commit with a passing unit test.
+- `deploy.sh down` removed the stack. The table stays, by design.
