@@ -2,16 +2,17 @@
 
 ## 0.1.0 (2026-09-25)
 
-First public release.
+First public release. Site: https://clod.farm
 
 - `clodfarm run`: a supervisor with a Remote Control keeper and N headless Claude Code workers.
-- DynamoDB single-table queue: priorities, leases, retries, parent and child tasks, resuming a parent in its own
-  session.
+- A shared task queue (SQLite on one box, DynamoDB across boxes): priorities, leases, retries, parent and child
+  tasks, resuming a parent in its own session.
 - Budget governor on Claude Code's real `rate_limit_event` utilization: weekly pacing (80% target by default), a
   5-hour ceiling (85%), pause on rejection, no paid overage. API-key mode with a daily dollar cap.
 - A planner that keeps the agents busy from `MISSION.md`.
 - A git worktree per task. Sub-tasks branch from their parent, and top-level tasks rebase and fast-forward into main.
-- Docker image, docker compose with DynamoDB Local, and an AWS CloudFormation deploy with no inbound ports.
+- A multi-arch Docker image (`ghcr.io/matank001/clodfarm`), a single-container compose file, and an AWS
+  CloudFormation deploy with no inbound ports.
 - **Zero-setup single box:** a built-in SQLite store (no database to run), a one-line installer, an optional `.env`,
   and `clodfarm mission`. DynamoDB only when one farm spans several boxes (`FARM_STORE=dynamodb`).
 - **Several Claude accounts in one farm:** a per-seat budget, slots and spend, a shared queue, task branches shared
