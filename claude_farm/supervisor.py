@@ -19,7 +19,7 @@ import sys
 import threading
 import time
 
-from . import gitops, prompts
+from . import gitops, notify, prompts
 from .auth import auth_status, banner, install_guide, trust_directory
 from .config import Config, load
 from .governor import Snapshot, decide
@@ -223,8 +223,14 @@ class Farm:
             queue = store.list_tasks("queued") + store.list_tasks("running") + store.list_tasks("waiting")
             prompt = prompts.planner_prompt(cfg, mission, recent, [t for t in queue if t["id"] != tid])
         elif resume:
-            children = [store.get_task(c) for c in task.get("children", [])]
-            prompt = prompts.resume_prompt([c for c in children if c])
+            reason = task.get("resume_reason")
+            if reason == "verify":
+                prompt = prompts.verify_prompt(cfg.verify_cmd, task.get("resume_note") or "")
+            elif reason == "timeout":
+                prompt = prompts.timeout_prompt(cfg.task_timeout)
+            else:
+                children = [store.get_task(c) for c in task.get("children", [])]
+                prompt = prompts.resume_prompt([c for c in children if c])
             if not session:
                 prompt = task["prompt"] + "\n\n---\n" + prompt
         else:
@@ -278,18 +284,50 @@ class Farm:
             store.update_task(tid, attempts=max(0, int(task.get("attempts", 1)) - 1))
             store.finish(tid, holder, False, "rate limited; re-queued", cfg.max_resumes)
             store.event("budget.rejected", "subscription rate limit hit; workers pause until reset", task=tid)
+            snap = store.get_snapshot()
+            self.notify("paused: usage limit", f"Claude reported a usage limit; all agents wait until "
+                        f"{iso(snap.resets_at) if snap and snap.resets_at else 'the reset'}.")
             return
+
+        if res.timed_out and res.session_id and int(task.get("timeout_resumes_used", 0)) < cfg.timeout_resumes:
+            # a timeout is often a big task mid-way: keep the work and the session, continue
+            if store.requeue_resume(tid, holder, "timeout", "", "timeout_resumes_used"):
+                return
 
         text = res.text
         if res.ok and branch:
-            text += "\n\n[git] " + self.land(task, cwd, branch, parent_branch)
+            line, outcome = self.land(task, cwd, branch, parent_branch)
+            if outcome == "verify_failed":
+                fresh = store.get_task(tid) or task
+                if res.session_id and int(fresh.get("verify_fixes_used", 0)) < cfg.verify_fixes and \
+                        store.requeue_resume(tid, holder, "verify", line, "verify_fixes_used"):
+                    return
+                res.ok = False
+                store.update_task(tid, attempts=int(fresh.get("max_attempts", 3)))  # fail now; don't retry from scratch
+                line = f"`{cfg.verify_cmd}` still fails after {cfg.verify_fixes} fix attempt(s); not landed. " \
+                       f"The branch {branch} is kept for a human.\n{line[-2000:]}"
+            text += "\n\n[git] " + line
         final = store.finish(tid, holder, res.ok, text, cfg.max_resumes)
+        failures = store.record_health(final != "failed" and res.ok)
+        if final == "failed":
+            self.notify(f"task failed: {task['title'][:80]}", f"{tid}: {text[-600:]}")
+        if cfg.stall_threshold and failures >= cfg.stall_threshold and not store.control().get("paused"):
+            reason = f"circuit breaker: {failures} failed runs in a row (last: {tid} {task['title'][:60]})"
+            store.set_paused(True, reason, by="farm")
+            self.notify("paused by circuit breaker", reason + ". Look at `claude-farm events` and `claude-farm task show "
+                        f"{tid}`, fix the cause, then run `claude-farm resume`.")
         if final == "done" and branch:
             # a sub-task's branch stays until its parent has merged it
             gitops.remove_worktree(cfg.repo_dir, cwd, None if task.get("parent") else branch)
         if task.get("kind") == "plan":
             spawned = int((store.get_task(tid) or {}).get("spawned", 0))
             store.planner_backoff(spawned, cfg.planner_cooldown, cfg.planner_max_backoff)
+            if not spawned and int(store.planner_state().get("idle_runs", 0)) == 1:
+                self.notify("nothing left to do", "The planner found nothing useful to queue from MISSION.md: "
+                            + res.text[-500:])
+
+    def notify(self, title: str, text: str):
+        notify.send(self.cfg.notify_url, title, text, self.cfg.name)
 
 
     def descendants(self, task: dict) -> list[str]:
@@ -300,8 +338,9 @@ class Farm:
             todo += (self.store.get_task(c) or {}).get("children") or []
         return out
 
-    def land(self, task: dict, cwd: str, branch: str, parent_branch: str | None) -> str:
-        """Put a successful run's commits where they belong. Returns a line for the task result."""
+    def land(self, task: dict, cwd: str, branch: str, parent_branch: str | None) -> tuple[str, str]:
+        """Put a successful run's commits where they belong. Returns (a line for the task result, outcome):
+        outcome is kept (stays on its branch), landed (on main), conflict or verify_failed."""
         cfg, store, tid = self.cfg, self.store, task["id"]
         cur = store.get_task(tid) or {}
         more_to_do = int(cur.get("children_open", 0)) > 0 or (
@@ -309,24 +348,32 @@ class Farm:
         try:
             if more_to_do:
                 gitops.commit_leftovers(cwd, branch)
-                return f"work kept on {branch}; sub-tasks branch from it and you merge them when resumed"
+                return f"work kept on {branch}; sub-tasks branch from it and you merge them when resumed", "kept"
             if parent_branch:
                 gitops.commit_leftovers(cwd, branch)
                 n = gitops.ahead_of(cfg.repo_dir, branch, parent_branch)
-                return f"{n} commit(s) on {branch}, left for the parent task to merge"
+                return f"{n} commit(s) on {branch}, left for the parent task to merge", "kept"
+            if cfg.verify_cmd:
+                # check exactly what would land: the branch rebased onto current main
+                gitops.rebase_onto_main(cfg.repo_dir, cwd, branch)
+                passed, output = gitops.run_check(cwd, cfg.verify_cmd, cfg.verify_timeout)
+                store.event("verify.passed" if passed else "verify.failed", f"{tid}: `{cfg.verify_cmd}`", task=tid)
+                if not passed:
+                    return output, "verify_failed"
             out = gitops.merge(cfg.repo_dir, cwd, branch, push=cfg.push)
             for d in self.descendants(task):  # their work is in main now, via this task
                 gitops.remove_worktree(cfg.repo_dir, os.path.join(os.path.dirname(cfg.repo_dir), ".worktrees", d),
                                        f"farm/{d}")
             gitops.prune_merged(cfg.repo_dir)
-            return out
+            return out + ("; check passed" if cfg.verify_cmd else ""), "landed"
         except gitops.GitError as e:
             store.add_task(f"Resolve merge conflict from task {tid}",
                            f"Task {tid} ({task['title']}) finished, but its branch {branch} conflicts with "
                            f"main. In your worktree run `git merge {branch}`, resolve the conflicts so both "
                            f"sides' intent is kept, run the tests, and commit.", priority=8,
                            created_by=tid, max_depth=99)
-            return str(e)
+            self.notify("merge conflict", f"{tid} ({task['title'][:80]}) conflicts with main; a resolve task was queued.")
+            return str(e), "conflict"
 
 
 def main():

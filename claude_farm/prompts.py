@@ -86,6 +86,19 @@ Finish with a one-paragraph summary of your plan.
 """
 
 
+def verify_prompt(cmd: str, output: str) -> str:
+    return (f"Before your work can land on main, the farm ran the project's check on your branch:\n\n    {cmd}\n\n"
+            f"It failed. Last lines of its output:\n\n```\n{output[-4000:]}\n```\n\n"
+            "Fix the cause (not the check), commit, and finish with a short summary. If the check itself is broken or "
+            "the failure is unrelated to your change, say so plainly in your summary.")
+
+
+def timeout_prompt(seconds: int) -> str:
+    return (f"Your previous run hit the farm's time limit ({seconds} s) and was stopped. This is the same session: "
+            "look at what you already did (`git status`, `git log`), commit what is good, and finish the task. If it is "
+            "too big for one run, split the rest into sub-tasks with `claude-farm task add --parent $FARM_TASK_ID` and end.")
+
+
 def resume_prompt(children: list[dict]) -> str:
     lines = []
     for c in children:

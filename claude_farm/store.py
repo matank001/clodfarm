@@ -291,9 +291,23 @@ class Store:
             if self._set_status(parent, "queued", cond=Attr("status").eq("waiting"), extra={"resume": True}):
                 self.event("task.resume", f"{parent}: all sub-tasks finished; resuming", task=parent)
 
+    def requeue_resume(self, tid: str, worker: str, reason: str, note: str, counter: str) -> bool:
+        """Put a running task straight back in the queue to be resumed in its own session (to fix a failing
+        verify, or to continue after a timeout). The attempt is given back; ``counter`` counts these."""
+        mine = Attr("worker").eq(worker) & Attr("status").eq("running")
+        task = self.get_task(tid) or {}
+        ok = self._set_status(tid, "queued", cond=mine, extra={
+            "resume": True, "resume_reason": reason, "resume_note": note[-6000:],
+            "attempts": max(0, int(task.get("attempts", 1)) - 1), counter: int(task.get(counter, 0)) + 1},
+            remove=("lease_until", "worker"))
+        if ok:
+            self.event(f"task.{reason}", f"{tid}: resuming to {'fix the failing check' if reason == 'verify' else 'continue after a timeout'}",
+                       task=tid)
+        return ok
+
     def mark_resumed(self, tid: str):
         self.t.update_item(Key={"PK": f"TASK#{tid}", "SK": "META"},
-                           UpdateExpression="SET pending_review = :f, #r = :f ADD resumes :one",
+                           UpdateExpression="SET pending_review = :f, #r = :f ADD resumes :one REMOVE resume_reason, resume_note",
                            ExpressionAttributeNames={"#r": "resume"},
                            ExpressionAttributeValues={":f": False, ":one": 1})
 
@@ -403,11 +417,22 @@ class Store:
     def set_paused(self, paused: bool, reason: str = "", by: str = "human"):
         self.t.put_item(Item=_clean({"PK": "CONTROL", "SK": "GLOBAL", "paused": paused, "reason": reason,
                                      "by": by, "at": now()}))
+        if not paused:
+            self.record_health(True)
         self.event("farm.paused" if paused else "farm.resumed", reason or "", by=by)
 
     def control(self) -> dict:
         r = self.t.get_item(Key={"PK": "CONTROL", "SK": "GLOBAL"})
         return _plain(r.get("Item", {}))
+
+    def record_health(self, ok: bool) -> int:
+        """Consecutive failed runs across all farms (the circuit breaker's input). Returns the new count."""
+        if ok:
+            self.t.put_item(Item={"PK": "CONTROL", "SK": "HEALTH", "failures": 0})
+            return 0
+        r = self.t.update_item(Key={"PK": "CONTROL", "SK": "HEALTH"}, UpdateExpression="ADD failures :one",
+                               ExpressionAttributeValues={":one": 1}, ReturnValues="UPDATED_NEW")
+        return int(r["Attributes"]["failures"])
 
     def planner_try_start(self, cooldown: int) -> bool:
         """Single-flight: only one planner run across all farms per cooldown."""

@@ -43,6 +43,13 @@ class Config:
     max_resumes: int
     idle_sleep: int
     push: bool
+    effort: str  # --effort for every agent run ("" = Claude Code's default)
+    verify_cmd: str  # shell command that must pass before a top-level task lands on main ("" = none)
+    verify_timeout: int
+    verify_fixes: int  # how many times an agent is resumed to fix a failing verify before the task fails
+    timeout_resumes: int  # how many times a timed-out run is resumed in its own session
+    stall_threshold: int  # this many failed runs in a row pause the whole farm (0 = never)
+    notify_url: str  # webhook for important events: ntfy, Slack or Discord ("" = none)
     task_budget_usd: float  # API mode: --max-budget-usd per agent run (0 = none)
     manage_claude_config: bool  # write the farm guide and folder trust into Claude Code's config (container: yes)
     policy: Policy
@@ -86,6 +93,13 @@ def load() -> Config:
         idle_sleep=int(_env("FARM_IDLE_SLEEP", "30")),
         push=_bool("FARM_PUSH", True),
         task_budget_usd=float(_env("FARM_TASK_BUDGET_USD", "0")),
+        effort=_env("FARM_EFFORT", ""),
+        verify_cmd=_env("FARM_VERIFY_CMD", ""),
+        verify_timeout=int(_env("FARM_VERIFY_TIMEOUT", "900")),
+        verify_fixes=int(_env("FARM_VERIFY_FIXES", "2")),
+        timeout_resumes=int(_env("FARM_TIMEOUT_RESUMES", "2")),
+        stall_threshold=int(_env("FARM_STALL_THRESHOLD", "5")),
+        notify_url=_env("FARM_NOTIFY_URL", ""),
         manage_claude_config=_bool("FARM_MANAGE_CLAUDE_CONFIG", True),
         policy=Policy(
             max_workers=int(_env("FARM_MAX_WORKERS", "3")),

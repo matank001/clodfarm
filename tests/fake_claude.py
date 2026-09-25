@@ -7,6 +7,8 @@ Behaviour is driven by words in the prompt, so tests can script agents:
   COMMIT <name> write <name>.txt in the working directory and git-commit it
   REJECT        report a rejected rate limit and fail
   SLOW <s>      sleep s seconds before answering
+  FAIL          end with an error result whose text mentions a rate limit (it is not one)
+  (resumed to fix a failing check: writes fixed.txt and commits it)
 Utilization reported in each rate_limit_event comes from FAKE_UTIL_5H / FAKE_UTIL_7D.
 Every invocation is appended to $FAKE_CLAUDE_LOG (JSON lines) for assertions.
 """
@@ -68,6 +70,12 @@ def main(argv):
              "result": "Claude usage limit reached.", "num_turns": 0})
         return 1
 
+    if "FAIL" in prompt and "ran the project's check" not in prompt:
+        out({"type": "result", "subtype": "error_during_execution", "is_error": True, "session_id": session,
+             "result": "3 tests failed: test_rate_limit_backoff expected 429", "num_turns": 1})
+        return 1
+    if "ran the project's check" in prompt:
+        prompt += " COMMIT fixed"
     m = re.search(r"SLOW (\d+)", prompt)
     if m:
         time.sleep(int(m.group(1)))

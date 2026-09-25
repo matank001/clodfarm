@@ -155,3 +155,73 @@ def test_agents_get_the_farm_guide(env):
         assert "claude-farm:guide:start" in open(env / "claude-home" / "CLAUDE.md").read()
     finally:
         stop_farm(farm, t)
+
+
+def test_verify_gate_resumes_the_agent_to_fix_a_failing_check(env, monkeypatch):
+    monkeypatch.setenv("FARM_VERIFY_CMD", "test -f fixed.txt")
+    farm, t = start_farm()
+    try:
+        tid = json.loads(cli("task", "add", "gated", "--prompt", "COMMIT feature", "--json").stdout)["id"]
+        wait_for(lambda: farm.store.get_task(tid)["status"] == "done", timeout=60)
+        assert {"feature.txt", "fixed.txt"} <= repo_files(env), "lands only after the check passes"
+        fix_runs = [c for c in calls(env) if c.get("task") == tid and "ran the project's check" in c["prompt"]]
+        assert len(fix_runs) == 1 and fix_runs[0]["resume"], "resumed in its own session with the failure"
+        assert int(farm.store.get_task(tid)["attempts"]) == 1
+    finally:
+        stop_farm(farm, t)
+
+
+def test_verify_gate_gives_up_and_keeps_main_clean(env, monkeypatch):
+    monkeypatch.setenv("FARM_VERIFY_CMD", "false")
+    monkeypatch.setenv("FARM_VERIFY_FIXES", "1")
+    farm, t = start_farm()
+    try:
+        tid = json.loads(cli("task", "add", "never passes", "--prompt", "COMMIT broken", "--json").stdout)["id"]
+        wait_for(lambda: farm.store.get_task(tid)["status"] == "failed", timeout=60)
+        assert "broken.txt" not in repo_files(env)
+        assert "not landed" in farm.store.get_task(tid)["result"]
+    finally:
+        stop_farm(farm, t)
+
+
+def test_timeout_resumes_the_same_session(env, monkeypatch):
+    monkeypatch.setenv("FARM_TASK_TIMEOUT", "2")
+    farm, t = start_farm()
+    try:
+        tid = json.loads(cli("task", "add", "slow", "--prompt", "SLOW 6 COMMIT slow", "--json").stdout)["id"]
+        wait_for(lambda: farm.store.get_task(tid)["status"] == "done", timeout=60)
+        runs = [c for c in calls(env) if c.get("task") == tid]
+        assert len(runs) == 2 and runs[1]["resume"] and "time limit" in runs[1]["prompt"]
+    finally:
+        stop_farm(farm, t)
+
+
+def test_circuit_breaker_pauses_and_notifies(env, monkeypatch):
+    import http.server
+    got = []
+
+    class H(http.server.BaseHTTPRequestHandler):
+        def do_POST(self):
+            got.append(self.rfile.read(int(self.headers["Content-Length"])).decode())
+            self.send_response(200)
+            self.end_headers()
+
+        def log_message(self, *a):
+            pass
+
+    srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    monkeypatch.setenv("FARM_NOTIFY_URL", f"http://127.0.0.1:{srv.server_port}/hook")
+    monkeypatch.setenv("FARM_STALL_THRESHOLD", "2")
+    farm, t = start_farm()
+    try:
+        for i in range(2):
+            cli("task", "add", f"broken {i}", "--prompt", "FAIL")
+        wait_for(lambda: farm.store.control().get("paused"), timeout=60)
+        assert "circuit breaker" in farm.store.control()["reason"]
+        assert farm.store.get_snapshot() is None or farm.store.get_snapshot().status != "rejected", \
+            "an error that mentions a rate limit is not a rate limit"
+        wait_for(lambda: any("circuit breaker" in g for g in got))
+    finally:
+        stop_farm(farm, t)
+        srv.shutdown()

@@ -95,6 +95,27 @@ def ahead_of(repo: str, branch: str, base: str | None = None) -> int:
     return int(out) if out.isdigit() else 0
 
 
+def rebase_onto_main(repo: str, path: str, branch: str):
+    """Bring the task branch up to date with main (so a check sees what would land). Conflicts raise GitError."""
+    commit_leftovers(path, branch)
+    base = main_branch(repo)
+    try:
+        git(path, "rebase", "-q", base)
+    except GitError as e:
+        git(path, "rebase", "--abort", check=False)
+        raise GitError(f"merge conflict rebasing {branch} onto {base}: {e}") from e
+
+
+def run_check(path: str, cmd: str, timeout: int) -> tuple[bool, str]:
+    """Run the project's check (tests, lint, build) in the worktree. Returns (passed, output tail)."""
+    try:
+        p = subprocess.run(["bash", "-lc", cmd], cwd=path, capture_output=True, text=True, timeout=timeout)
+    except subprocess.TimeoutExpired as e:
+        out = ((e.stdout or b"").decode(errors="replace") if isinstance(e.stdout, bytes) else (e.stdout or ""))
+        return False, f"(check timed out after {timeout}s)\n{out[-3000:]}"
+    return p.returncode == 0, ((p.stdout or "") + (p.stderr or ""))[-6000:]
+
+
 def merge(repo: str, path: str, branch: str, push: bool = True) -> str:
     """Rebase the task branch onto main and fast-forward main. Returns a summary."""
     with _lock:

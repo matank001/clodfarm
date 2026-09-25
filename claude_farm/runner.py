@@ -12,8 +12,9 @@ from dataclasses import dataclass, field
 
 from .governor import Snapshot
 
-# Claude Code's wording when the subscription limit is hit and no rate_limit_event says so
-LIMIT_TEXT = re.compile(r"usage limit|limit reached|limit will reset|out of (extra )?usage|rate[_ ]limit|\b429\b", re.I)
+# Claude Code's wording when the subscription limit is hit and no rate_limit_event says so. Only ever matched
+# against an *error* result, never against what the agent wrote (a task about rate limiting is not a rate limit).
+LIMIT_TEXT = re.compile(r"usage limit|limit reached|limit will reset|out of (extra )?usage", re.I)
 
 
 @dataclass
@@ -28,6 +29,8 @@ class RunResult:
     duration_s: float = 0.0
     snapshots: list = field(default_factory=list)
     rate_limited: bool = False
+    timed_out: bool = False
+    error_text: str = ""  # the result text when Claude Code reported an error
 
 
 def build_cmd(cfg, system_prompt: str, resume_session: str | None = None) -> list[str]:
@@ -36,6 +39,8 @@ def build_cmd(cfg, system_prompt: str, resume_session: str | None = None) -> lis
            "--append-system-prompt", system_prompt]
     if getattr(cfg, "task_budget_usd", 0) and cfg.policy.api_mode:
         cmd += ["--max-budget-usd", str(cfg.task_budget_usd)]
+    if getattr(cfg, "effort", ""):
+        cmd += ["--effort", cfg.effort]
     if resume_session:
         cmd += ["--resume", resume_session]
     return cmd
@@ -101,6 +106,10 @@ def run_agent(cmd: list[str], prompt: str, cwd: str, env: dict, timeout: int,
             res.terminal_reason = ev.get("terminal_reason")
             res.num_turns = int(ev.get("num_turns") or 0)
             res.ok = not ev.get("is_error") and ev.get("subtype", "success") == "success"
+            if not res.ok:
+                res.error_text = str(ev.get("result") or ev.get("subtype") or "")[:2000]
+                if ev.get("api_error_status") == 429:
+                    res.rate_limited = True
     proc.wait()
     killer.cancel()
     res.duration_s = time.time() - t0
@@ -109,8 +118,10 @@ def run_agent(cmd: list[str], prompt: str, cwd: str, env: dict, timeout: int,
     if proc.returncode not in (0, None) and res.ok:
         res.ok = False
     if time.time() - t0 >= timeout:
-        res.ok, res.text = False, f"timed out after {timeout}s. Last output: {res.text[-1500:]}"
-    elif not res.ok and not res.rate_limited and LIMIT_TEXT.search(res.text[-2000:]):
+        # checked first: a timeout must never be mistaken for a usage limit
+        res.ok, res.timed_out, res.rate_limited = False, True, False
+        res.text = f"timed out after {timeout}s. Last output: {res.text[-1500:]}"
+    elif not res.ok and not res.rate_limited and LIMIT_TEXT.search(res.error_text):
         res.rate_limited = True
     return res
 

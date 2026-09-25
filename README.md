@@ -39,6 +39,8 @@ claude-farm handles those parts:
 | **Budget as a whole** | Every agent run reports the account's real utilization (Claude Code's `rate_limit_event`). The governor paces the week, leaves you 20% of it by default, pauses before a 5-hour window fills, and sleeps until the reset when rejected. It never draws on paid overage unless you allow it. With an API key it enforces a daily dollar cap instead. |
 | **Keeps working** | When the queue runs dry, a planner agent reads your `MISSION.md` and what was done so far, then queues the next tasks. |
 | **Sub-agents** | Any agent can run `claude-farm task add --parent $FARM_TASK_ID ...` to fan out. Sub-agents run in parallel in their own git worktrees, and the parent is resumed *in its own session* with their results. |
+| **Checked before it lands** | Set `FARM_VERIFY_CMD` (e.g. `pytest -q`). A finished task is rebased onto main and the check runs. If it fails, the agent is resumed *in its own session* with the failure output, and nothing reaches main until the check passes. |
+| **Fails safely** | A timed-out run continues in its session instead of starting over. N failed runs in a row trip a circuit breaker that pauses every box. `FARM_NOTIFY_URL` (ntfy, Slack or Discord) tells you when a task fails, the farm pauses, a limit hits, or the mission is done. |
 | **Steerable from your phone** | `claude remote-control` stays up, so the farm shows up in the Claude app and at claude.ai/code. |
 | **One budget, many boxes** | Point several containers at the same DynamoDB table and they share one queue and one governor. |
 
@@ -191,6 +193,29 @@ All settings are environment variables. [.env.example](.env.example) documents e
 | `FARM_REPO_URL` | *(empty)* | git repo to work in; empty means a fresh local repo |
 | `FARM_PERMISSION_MODE` | `bypassPermissions` | the container is the sandbox; see [docs/security.md](docs/security.md) |
 | `FARM_REMOTE_CONTROL` | `1` | keep a Remote Control session up |
+| `FARM_VERIFY_CMD` | *(empty)* | check that must pass before a task lands on main, e.g. `python -m pytest -q` |
+| `FARM_NOTIFY_URL` | *(empty)* | ntfy topic, Slack or Discord webhook for failures, pauses, limits and "nothing left to do" |
+| `FARM_STALL_THRESHOLD` | `5` | failed runs in a row that pause the farm (circuit breaker) |
+| `FARM_EFFORT` | *(default)* | `--effort` for every agent (`low` … `max`) |
+
+## Related projects (and what we took from them)
+
+- [ralph-claude-code](https://github.com/frankbria/ralph-claude-code) runs one Claude Code loop until the project is
+  done, with a circuit breaker and careful exit detection. From its bug history we took three rules:
+  - usage-limit detection must never trust the agent's own text;
+  - a timeout is not a limit;
+  - a timed-out run should keep its progress.
+- [continuous-claude](https://github.com/AnandChowdhary/continuous-claude) is a loop that opens a PR per iteration
+  and merges only when CI passes. That's the idea behind `FARM_VERIFY_CMD`.
+- [sleepless-agent](https://github.com/context-machine-lab/sleepless-agent) is a 24/7 daemon with a task queue and
+  Slack control, which throttles on `claude /usage`.
+- There are also several small images that keep `claude remote-control` running in a container.
+
+claude-farm puts these together into one self-hosted system:
+- parallel workers;
+- a parent/sub-agent task tree that resumes parents in their own session;
+- one governor that paces the real 5-hour and weekly windows across every box sharing a table;
+- a no-inbound-port cloud deploy.
 
 ## Is this allowed?
 

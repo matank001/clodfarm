@@ -84,7 +84,10 @@ on first start, so that only happens if you remove it.
 
 | Failure | What happens |
 |---|---|
-| The agent process crashes or times out | The attempt counts. The task is re-queued until `max_attempts` (3), then marked `failed` with the output. |
+| The agent process crashes | The attempt counts. The task is re-queued until `max_attempts` (3), then marked `failed` with the output. |
+| The agent run times out | The session is resumed ("you hit the time limit; commit what's good and finish or split") up to `FARM_TIMEOUT_RESUMES` (2) times, keeping the work and the attempt. |
+| `FARM_VERIFY_CMD` fails before landing | The branch is rebased onto main and the check runs in the worktree. On failure the agent is resumed with the output, up to `FARM_VERIFY_FIXES` (2) times. After that the task fails and main is untouched. |
+| Many failures in a row | After `FARM_STALL_THRESHOLD` (5) failed runs in a row on any box, the circuit breaker pauses the whole farm and notifies you. `claude-farm resume` resets it. |
 | The container or box dies mid-run | The lease (5 min, renewed every ~100 s) expires. Housekeeping on any box re-queues the task. The slot lease expires too. |
 | DynamoDB is briefly unreachable | Worker threads log and retry after 30 s. The event log never raises. |
 | Remote Control exits | Restarted after 10 s, with exponential back-off up to 30 min if it keeps failing fast. |
