@@ -1,7 +1,7 @@
 #!/bin/sh
 # clodfarm installer: one container, one login.
 #   curl -fsSL https://raw.githubusercontent.com/matank001/clodfarm/main/scripts/install.sh | sh
-# Options (environment): FARM_MISSION="..."  CLAUDE_FARM_IMAGE=...  CLAUDE_FARM_NAME=clodfarm
+# Options (environment): any FARM_* setting, e.g. FARM_MISSION="..." FARM_VERIFY_CMD="pytest -q"; CLAUDE_FARM_IMAGE, CLAUDE_FARM_NAME
 set -eu
 IMAGE="${CLAUDE_FARM_IMAGE:-ghcr.io/matank001/clodfarm:latest}"
 NAME="${CLAUDE_FARM_NAME:-clodfarm}"
@@ -17,8 +17,10 @@ else
   say "Pulling $IMAGE"
   docker pull -q "$IMAGE" >/dev/null
   say "Starting $NAME (restarts on reboot; your login and work live in Docker volumes)"
-  docker run -d --name "$NAME" --restart unless-stopped \
-    -e FARM_CONTAINER_NAME="$NAME" ${FARM_MISSION:+-e FARM_MISSION="$FARM_MISSION"} \
+  # pass every FARM_* setting from your shell through (FARM_VERIFY_CMD, FARM_MAX_WORKERS, FARM_NOTIFY_URL, ...)
+  for v in $(env | sed -n 's/^\(FARM_[A-Z0-9_]*\)=.*/\1/p'); do set -- "$@" -e "$v"; done
+  docker run -d --name "$NAME" --restart unless-stopped "$@" \
+    -e FARM_CONTAINER_NAME="$NAME" \
     -v clodfarm_claude-home:/home/farm/.claude -v clodfarm_workspace:/workspace \
     "$IMAGE" >/dev/null
 fi

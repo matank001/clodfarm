@@ -34,6 +34,8 @@ Before the first run there's no data. The governor then allows one agent, which 
      (`ceil(max_workers × headroom / band)`).
    - Over the line, run nothing until the line catches up. The governor computes that moment and sleeps until then.
    - The weekly band is tight (5%), so the week is spread out. The 5-hour band is loose (30%), so bursts are fine.
+   - Pacing never drops below `FARM_MIN_WORKERS` (1). It slows the farm down; only the hard stops above stop it.
+     Without this floor, normal use early in a week (right after the reset) froze the farm.
 4. **Optional end-of-week burst:** with `FARM_BURST_HOURS` > 0 (off by default), weekly pacing is skipped that
    many hours before the weekly reset. The agents then run at full speed, but never past the target.
 

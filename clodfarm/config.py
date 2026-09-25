@@ -119,6 +119,7 @@ def load() -> Config:
         manage_claude_config=_bool("FARM_MANAGE_CLAUDE_CONFIG", True),
         policy=Policy(
             max_workers=int(_env("FARM_MAX_WORKERS", "3")),
+            min_workers=int(_env("FARM_MIN_WORKERS", "1")),
             weekly_target=float(_env("FARM_WEEKLY_TARGET", "0.80")),
             five_hour_ceiling=float(_env("FARM_FIVE_HOUR_CEILING", "0.85")),
             weekly_band=float(_env("FARM_WEEKLY_BAND", "0.05")),

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.1 (2026-09-25)
+
+- Pacing slows the farm but never stops it: at least `FARM_MIN_WORKERS` (1) agent keeps working unless a hard limit
+  applies (5-hour ceiling, weekly target, rejection, paid overage). Found in the public end-to-end test, where a week
+  that had just reset froze a fresh install at 0 agents.
+- One source for the governor defaults (80% weekly, 85% per 5-hour window).
+- The installer passes every `FARM_*` setting from your shell into the container, e.g.
+  `FARM_VERIFY_CMD="pytest -q"`.
+
 ## 0.1.0 (2026-09-25)
 
 First public release. Site: https://clod.farm

@@ -1,7 +1,7 @@
 from clodfarm.governor import FIVE_HOURS, SEVEN_DAYS, Policy, Snapshot, Window, decide
 
 NOW = 1_800_000_000.0
-P = Policy(max_workers=4, weekly_target=0.90, five_hour_ceiling=0.90, weekly_band=0.05, five_hour_band=0.30, burst_hours=12)
+P = Policy(max_workers=4, min_workers=0, weekly_target=0.90, five_hour_ceiling=0.90, weekly_band=0.05, five_hour_band=0.30, burst_hours=12)
 
 
 def snap(u5=0.1, u7=0.1, left5=FIVE_HOURS / 2, left7=SEVEN_DAYS / 2, status="allowed", overage=False):
@@ -102,3 +102,23 @@ def test_api_mode_daily_cap_pauses_until_utc_midnight():
 def test_defaults_leave_room_for_the_human():
     p = Policy()
     assert p.burst_hours == 0 and not p.allow_overage
+
+
+def test_pacing_slows_but_never_stops_the_farm():
+    """Regression (public e2e, 2026-09-25): a week that had just reset, with the owner's own use, froze the farm at 0/3."""
+    p = Policy(max_workers=3)                      # defaults: min_workers=1, weekly target 80%
+    s = snap(u5=0.44, u7=0.07, left7=SEVEN_DAYS * 0.977)
+    d = decide(s, p, NOW)
+    assert d.workers >= 1 and d.pause_until is None
+
+
+def test_hard_stops_still_go_to_zero_with_the_floor():
+    p = Policy(max_workers=3)
+    assert decide(snap(u5=0.90), p, NOW).workers == 0          # 5-hour ceiling (85%)
+    assert decide(snap(u7=0.81), p, NOW).workers == 0          # weekly target (80%)
+    assert decide(snap(status="rejected"), p, NOW).workers == 0
+
+
+def test_policy_defaults_match_the_documented_ones():
+    p = Policy()
+    assert (p.weekly_target, p.five_hour_ceiling, p.min_workers) == (0.80, 0.85, 1)

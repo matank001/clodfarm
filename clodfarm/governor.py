@@ -15,6 +15,7 @@ Rules, in order:
 3. Pacing. Spread the weekly allowance over the week so there is always room
    left for the human, and so agents don't burn the whole week on day two.
    The same pacing (with a wider band) applies inside each 5-hour window.
+   Pacing never drops below ``min_workers`` (default 1): it slows the farm down, only the hard stops stop it.
 4. Optional end-of-week burst (off by default): within ``burst_hours`` of the
    weekly reset, skip weekly pacing and run at full concurrency up to the target.
 
@@ -101,8 +102,9 @@ class Snapshot:
 @dataclass
 class Policy:
     max_workers: int = 3
-    weekly_target: float = 0.90  # stop at 90% of the 7-day window (10% left for you)
-    five_hour_ceiling: float = 0.90  # never push a 5-hour window past this
+    min_workers: int = 1  # pacing slows the farm down but never below this; only hard stops go to zero
+    weekly_target: float = 0.80  # stop at 80% of the 7-day window (20% left for you)
+    five_hour_ceiling: float = 0.85  # never push a 5-hour window past this
     weekly_band: float = 0.05  # how far ahead of the weekly pace we may run
     five_hour_band: float = 0.30  # 5-hour pacing is loose: bursts are fine
     burst_hours: float = 0.0  # opt-in: this close to a weekly reset, run at full speed up to the target
@@ -227,6 +229,11 @@ def decide(snap: Snapshot | None, policy: Policy, now: float, spent_today: float
             resume.append(r)
 
     workers = math.ceil(n * frac - 1e-9) if frac > 0 else 0
+    floor = min(max(policy.min_workers, 0), n)
+    if workers < floor:
+        # Pacing spreads the week out; it isn't a stop. The hard limits above (5-hour ceiling, weekly target,
+        # rejection, overage) still go to zero. Without a floor, any normal use early in a week froze the farm.
+        return Decision(floor, "; ".join(reasons) + f" (keeping {floor} agent{'s' if floor > 1 else ''} working)", None, details)
     if workers == 0:
         return Decision(0, "; ".join(reasons) or "paced", max(resume) if resume else now + 300, details)
     return Decision(workers, "; ".join(reasons) or "within budget: full speed", None, details)
