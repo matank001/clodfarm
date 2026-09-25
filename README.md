@@ -44,16 +44,46 @@ claude-farm handles those parts:
 | **Steerable from your phone** | `claude remote-control` stays up, so the farm shows up in the Claude app and at claude.ai/code. |
 | **Many boxes, many Claude accounts, one farm** | Point any number of containers at the same DynamoDB table, each logged in to its own account (yours, a teammate's Team seat). They share one queue and one git origin, but **every account gets its own budget**: the governor paces each seat on its own real usage, so when one seat hits a limit, the others keep working. See [docs/multi-seat.md](docs/multi-seat.md). |
 
-## Quick start (local, no AWS account needed)
+## Deploy
+
+Pick one:
+
+| | What you get | Go to |
+|---|---|---|
+| **Single deployment** | One box and one Claude account. Everything runs in one container. | [below](#single-deployment) |
+| **Multiple deployments, one farm** | Several boxes, on your account or on teammates' own accounts, sharing one queue and one repo, each account paced on its own budget. | [below](#multiple-deployments-one-farm) |
+
+You can start single and add boxes later without changing anything: a second box just joins the first one's table.
+
+---
+
+## Single deployment
+
+### A. Your machine or any Docker host (no AWS account needed)
 
 ```bash
 git clone https://github.com/matank001/claude-farm && cd claude-farm
 cp .env.example .env
-docker compose up -d                     # claude-farm + a bundled DynamoDB Local
-docker exec -it claude-farm claude-farm login  # prints a URL: open it, approve, paste the code
+docker compose up -d                            # claude-farm + a bundled DynamoDB Local
+docker exec -it claude-farm claude-farm login   # prints a URL: open it anywhere, approve, paste the code back
 ```
 
-Then give it something to do:
+On a remote server, log in with `ssh -t myserver docker exec -it claude-farm claude-farm login`.
+
+### B. AWS (about 10 minutes, one box, no open ports)
+
+```bash
+deploy/aws/deploy.sh up       # CloudFormation: VPC, EC2 t4g.medium, DynamoDB table, IAM role limited to that table
+deploy/aws/deploy.sh login    # over SSM Session Manager: URL + code, same as above
+deploy/aws/deploy.sh status
+```
+
+You need the AWS CLI v2 and the
+[Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html).
+The box has **no inbound ports**: Remote Control, the Claude API and SSM all use outbound HTTPS. Details:
+[docs/deploy-aws.md](docs/deploy-aws.md).
+
+### Give it work
 
 ```bash
 docker exec -it claude-farm bash -c 'cat > /workspace/repo/MISSION.md <<EOF
@@ -65,39 +95,76 @@ docker exec claude-farm claude-farm status
 docker logs -f claude-farm
 ```
 
+On AWS, run the same commands inside `deploy/aws/deploy.sh shell`.
+
 Or open the **Claude app → Code**, pick the session named `claude-farm`, and talk to it.
 
-Want the agents to work on a real repo? Set `FARM_REPO_URL` in `.env` (plus a deploy key if it's private).
-The farm clones it into `/workspace/repo` and pushes `main` after each finished task.
+To work on a real repo, set `FARM_REPO_URL` in `.env` (plus a deploy key if it's private). The farm clones it into
+`/workspace/repo` and pushes `main` after each finished task. Set `FARM_VERIFY_CMD` (e.g. `pytest -q`) so nothing
+lands without passing your tests.
 
-## Deploy on AWS (about 10 minutes, one box, no open ports)
+---
+
+## Multiple deployments, one farm
+
+A farm is one DynamoDB table.
+- **Shared:** every box pointed at that table shares **one queue** and **one git repo**.
+- **Per account:** each box is paced on the budget of the Claude account it's logged in to (its **seat**). When one
+  seat hits a limit, only its boxes pause; the others keep taking work.
+
+**You need:**
+- **real DynamoDB** (the AWS deploy creates it);
+- **a shared git repo every box can push to** (`--workspace-repo` / `FARM_REPO_URL`, with a deploy key or token);
+  task branches travel through it.
+
+### A. More boxes on the same account
 
 ```bash
-deploy/aws/deploy.sh up          # CloudFormation: VPC, EC2 t4g.medium, DynamoDB table, IAM role (only that table)
-deploy/aws/deploy.sh login       # over SSM Session Manager: URL + code, same as local
-deploy/aws/deploy.sh status
+deploy/aws/deploy.sh up --workspace-repo git@github.com:you/repo.git          # box 1 creates the farm (table "claude-farm")
+deploy/aws/deploy.sh login
+
+STACK=farm-2 deploy/aws/deploy.sh up --table claude-farm --workspace-repo git@github.com:you/repo.git
+STACK=farm-2 deploy/aws/deploy.sh login                                        # the same account, one login per box
 ```
 
-You need the AWS CLI v2 and the
-[Session Manager plugin](https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html).
-The box has **no inbound ports**: Remote Control, the Claude API and SSM all use outbound HTTPS. See
-[docs/deploy-aws.md](docs/deploy-aws.md). Any other Linux host works too: `docker compose up -d`, then
-`ssh -t host docker exec -it claude-farm claude-farm login`.
+The account's concurrency cap covers all its boxes together. More boxes add room to run, never extra usage.
 
-## One farm, several Claude accounts
+### B. Several Claude accounts (e.g. you and a teammate)
 
 ```bash
-deploy/aws/deploy.sh up --workspace-repo git@github.com:you/repo.git                 # box 1: creates the farm (table "claude-farm")
+# you: box 1, as in A
+# your teammate, on their own box, with their own login:
 STACK=farm-gil deploy/aws/deploy.sh up --table claude-farm --workspace-repo git@github.com:you/repo.git
-STACK=farm-gil deploy/aws/deploy.sh login                                             # Gil logs in to HIS account
-claude-farm budget                                                                     # every seat, its usage, what it may run
+STACK=farm-gil deploy/aws/deploy.sh login                                      # Gil logs in to HIS account
+claude-farm budget                                                              # every seat: usage, boxes, what it may run
 ```
-- **Shared across boxes:** the queue, and the git origin, so a sub-task can run on Gil's box and be merged by a
-  parent on yours.
-- **Separate per seat:** the budget, usage snapshots and concurrency slots.
-- **Sessions:** a resumed parent waits a few minutes for the box that holds its conversation.
-- **Terms:** use Team/Enterprise seats for people working together, each person on their own login. Details and
-  the terms in [docs/multi-seat.md](docs/multi-seat.md).
+
+- A sub-task can run on Gil's box and be merged by its parent on yours.
+- A resumed parent waits a few minutes for the box that holds its conversation.
+- Use Team or Enterprise seats for people working together, each person on their own login.
+
+### Any Docker host, not AWS
+
+Set these in `.env`:
+- `FARM_TABLE=<the farm's table>`
+- `FARM_DYNAMODB_ENDPOINT=` (empty)
+- `FARM_REPO_URL=<the shared repo>`
+
+Then remove `COMPOSE_PROFILES=local`, give the box AWS credentials for that table, and run:
+
+```bash
+docker compose up -d && docker exec -it claude-farm claude-farm login
+```
+
+### Add work from your laptop, without running a worker
+
+```bash
+pip install git+https://github.com/matank001/claude-farm
+export FARM_TABLE=claude-farm FARM_DYNAMODB_ENDPOINT= AWS_REGION=<region>    # plus AWS credentials for the table
+claude-farm task add "Refactor the parser" --prompt "..." && claude-farm status
+```
+
+Full guide and the terms: [docs/multi-seat.md](docs/multi-seat.md).
 
 ## Logging in (the part people ask about)
 
