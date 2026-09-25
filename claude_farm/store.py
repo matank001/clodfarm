@@ -194,7 +194,8 @@ class Store:
         if not ok:
             task = self.get_task(tid) or {}
             status = "failed" if int(task.get("attempts", 1)) >= int(task.get("max_attempts", 3)) else "queued"
-            self._set_status(tid, status, when=mine, extra=fields, remove=drop)
+            if not self._set_status(tid, status, when=mine, extra=fields, remove=drop):
+                return task.get("status", "unknown")  # not ours any more (finished, reaped or cancelled): no-op
             self.event("task.failed" if status == "failed" else "task.retry", f"{tid}: {result[-200:]}", task=tid)
             if status == "failed":
                 self._child_finished(tid)

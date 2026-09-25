@@ -93,7 +93,7 @@ class SqliteBackend(Backend):
                     db.execute("ROLLBACK")
                     return False
             db.execute("INSERT OR REPLACE INTO items (pk, sk, gpk, gsk, ver, expires, data) VALUES (?,?,?,?,?,?,?)",
-                       (item["PK"], item["SK"], item.get("GSI1PK"), item.get("GSI1SK"), int(item.get("ver", 1)),
+                       (item["PK"], item["SK"], item.get("GSI1PK"), item.get("GSI1SK"), int(item.get("ver", 0)),
                         item.get("expires_at"), data))
             db.execute("COMMIT")
             return True
@@ -210,7 +210,8 @@ class DynamoBackend(Backend):
     def put(self, item, expect_ver=None):
         kw = {"Item": _to_ddb(item)}
         if expect_ver == 0:
-            kw["ConditionExpression"] = self._Attr("PK").not_exists()
+            # absent, or written before items carried a version (an older claude-farm): adopt it
+            kw["ConditionExpression"] = self._Attr("PK").not_exists() | self._Attr("ver").not_exists()
         elif expect_ver is not None:
             kw["ConditionExpression"] = self._Attr("ver").eq(expect_ver)
         try:

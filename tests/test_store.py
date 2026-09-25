@@ -170,3 +170,21 @@ def test_resumed_task_waits_for_its_home_box(store):
     assert store.get_task(t["id"])["status"] == "queued"
     assert store.claim_next("boxB/w0", 60, "boxB") is None, "another box doesn't steal a resume within the affinity"
     assert store.claim_next("boxA/w0", 60, "boxA")["id"] == t["id"]
+
+
+def test_items_written_before_versioning_are_adopted(store):
+    """Regression (cloud test 3): an item without `ver`, written by an older claude-farm, must still update."""
+    store.b.put({"PK": "CONTROL", "SK": "HEALTH", "failures": 0})  # the old format: no version
+    assert store.record_health(False) == 1
+    assert store.record_health(False) == 2
+    assert store.record_health(True) == 0
+
+
+def test_finishing_a_task_that_is_no_longer_yours_is_a_no_op(store):
+    t = store.add_task("x", "x")
+    store.claim_next("w1", 60)
+    store.finish(t["id"], "w1", True, "done", 5)
+    before = len(store.events(limit=500))
+    assert store.finish(t["id"], "w1", False, "late farm error", 5) == "done"
+    assert store.get_task(t["id"])["status"] == "done"
+    assert len(store.events(limit=500)) == before, "no misleading task.retry event"

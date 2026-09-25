@@ -333,6 +333,13 @@ class Farm:
                        f"The branch {branch} is kept for a human.\n{line[-2000:]}"
             text += "\n\n[git] " + line
         final = store.finish(tid, holder, res.ok, text, cfg.max_resumes)
+        try:
+            self.after_run(task, final, res, text, cwd, branch)
+        except Exception as e:  # noqa: BLE001 - bookkeeping after a finished run must never re-open the task
+            print(f"after-run bookkeeping for {tid} failed: {e!r}", flush=True)
+
+    def after_run(self, task: dict, final: str, res, text: str, cwd: str, branch: str | None):
+        cfg, store, tid = self.cfg, self.store, task["id"]
         failures = store.record_health(final != "failed" and res.ok)
         if final == "failed":
             self.notify(f"task failed: {task['title'][:80]}", f"{tid}: {text[-600:]}")
