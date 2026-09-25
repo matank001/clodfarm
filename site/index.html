@@ -6,11 +6,15 @@
 <title>clodfarm: a farm of Claude Code agents</title>
 <meta name="description" content="clodfarm runs a farm of Claude Code agents in one container. They split work into sub-agents, test it before it lands, and pace themselves on your account's real usage limits. Open source, MIT.">
 <link rel="canonical" href="https://clod.farm/">
-<meta name="theme-color" content="#0A1030">
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
+<meta name="theme-color" content="#070B1C">
+<link rel="apple-touch-icon" href="/apple-touch-icon.png">
+<link rel="manifest" href="/site.webmanifest">
 <meta name="color-scheme" content="dark">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 
 <meta property="og:type" content="website">
+<meta property="og:locale" content="en_US">
 <meta property="og:site_name" content="clodfarm">
 <meta property="og:url" content="https://clod.farm/">
 <meta property="og:title" content="clodfarm: a farm of Claude Code agents">
@@ -46,13 +50,64 @@
   "offers": {"@type": "Offer", "price": "0", "priceCurrency": "USD"}
 }
 </script>
+<script type="application/ld+json">
+{
+ "@context": "https://schema.org",
+ "@type": "FAQPage",
+ "mainEntity": [
+  {
+   "@type": "Question",
+   "name": "What is clodfarm?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "An open-source program (MIT) that runs Claude Code agents around the clock in one Docker container. You give it a mission or tasks; agents take work from a queue, split big jobs into sub-agents, test the result, and land passing work in your git repo."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "How does it avoid using up my Claude limits?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "Every agent run reports your account's real 5-hour and weekly usage from Claude Code itself. By default the agents stop at 80% of the week and 85% of any 5-hour window, and those numbers include your own chats. On a usage limit it waits for the reset."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "How do I install it?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "Run the one-line installer on any machine with Docker. It starts the container and asks you to log in to your Claude account: open the link on any device and paste the code back. On AWS, one command deploys it with no open ports."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "Can several machines or accounts share one farm?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "Yes. Point several boxes at one shared DynamoDB table and git repo. They share one queue, and each Claude account is paced on its own budget. For people working together, use Team or Enterprise seats, each person on their own login."
+   }
+  },
+  {
+   "@type": "Question",
+   "name": "Is clodfarm made by Anthropic?",
+   "acceptedAnswer": {
+    "@type": "Answer",
+    "text": "No. It is an independent open-source project, not affiliated with or endorsed by Anthropic. Claude and Claude Code are trademarks of Anthropic, PBC."
+   }
+  }
+ ]
+}
+</script>
+<script type="application/ld+json">
+{"@context": "https://schema.org", "@type": "WebSite", "name": "clodfarm", "alternateName": "clod.farm", "url": "https://clod.farm/", "inLanguage": "en"}
+</script>
 </head>
 <body>
 <a class="skip" href="#main">Skip to content</a>
 
 <div class="stage">
 <header class="bar">
-  <a class="mark" href="/" aria-label="clodfarm home">clod<span>farm</span></a>
+  <a class="mark" href="/" aria-label="clodfarm home"><img src="/logo.svg" width="30" height="30" alt=""><span>clodfarm</span></a>
   <nav aria-label="Main">
     <a href="https://github.com/matank001/clodfarm/tree/main/docs">Docs</a>
     <a class="gh" href="https://github.com/matank001/clodfarm">GitHub</a>
@@ -101,6 +156,30 @@
   </section>
 </main>
 </div>
+
+<section class="faq" aria-labelledby="faq-h">
+  <h2 id="faq-h">Questions</h2>
+    <details>
+      <summary>What is clodfarm?</summary>
+      <p>An open-source program (MIT) that runs Claude Code agents around the clock in one Docker container. You give it a mission or tasks; agents take work from a queue, split big jobs into sub-agents, test the result, and land passing work in your git repo.</p>
+    </details>
+    <details>
+      <summary>How does it avoid using up my Claude limits?</summary>
+      <p>Every agent run reports your account&#x27;s real 5-hour and weekly usage from Claude Code itself. By default the agents stop at 80% of the week and 85% of any 5-hour window, and those numbers include your own chats. On a usage limit it waits for the reset.</p>
+    </details>
+    <details>
+      <summary>How do I install it?</summary>
+      <p>Run the one-line installer on any machine with Docker. It starts the container and asks you to log in to your Claude account: open the link on any device and paste the code back. On AWS, one command deploys it with no open ports.</p>
+    </details>
+    <details>
+      <summary>Can several machines or accounts share one farm?</summary>
+      <p>Yes. Point several boxes at one shared DynamoDB table and git repo. They share one queue, and each Claude account is paced on its own budget. For people working together, use Team or Enterprise seats, each person on their own login.</p>
+    </details>
+    <details>
+      <summary>Is clodfarm made by Anthropic?</summary>
+      <p>No. It is an independent open-source project, not affiliated with or endorsed by Anthropic. Claude and Claude Code are trademarks of Anthropic, PBC.</p>
+    </details>
+</section>
 
 <footer class="foot">
   <p>clodfarm is an independent open-source project, not affiliated with Anthropic. Claude and Claude Code are

@@ -1,0 +1,4 @@
+Contact: https://github.com/matank001/clodfarm/security/advisories/new
+Expires: 2027-09-25T00:00:00.000Z
+Preferred-Languages: en
+Canonical: https://clod.farm/.well-known/security.txt
