@@ -23,7 +23,7 @@ body { margin: 0; font: 400 1rem/1.6 var(--sans); background: #070B1C; }
   height: 100svh; min-height: 560px; display: flex; flex-direction: column;
   background:
     linear-gradient(to top, #070B1C 0, rgba(7, 11, 28, 0) 12%),
-    url("/scene.svg") center bottom / var(--scene-w) auto no-repeat,
+    url("/scene.svg?v=202609251823") center bottom / var(--scene-w) auto no-repeat,
     radial-gradient(1.2px 1.2px at 12% 14%, #fff9 50%, transparent 51%),
     radial-gradient(1px 1px at 34% 8%, #fff8 50%, transparent 51%),
     radial-gradient(1.4px 1.4px at 56% 19%, #fffa 50%, transparent 51%),
