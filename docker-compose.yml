@@ -1,19 +1,19 @@
-# One container, zero config:   docker compose up -d && docker exec -it claude-farm claude-farm login
+# One container, zero config:   docker compose up -d && docker exec -it clodfarm clodfarm login
 # Settings are optional: copy .env.example to .env to change any of them.
 # Several boxes / accounts in one farm: set FARM_STORE=dynamodb and FARM_TABLE (docs/multi-seat.md).
-name: claude-farm
+name: clodfarm
 
 services:
-  claude-farm:
-    image: ghcr.io/matank001/claude-farm:latest
+  clodfarm:
+    image: ghcr.io/matank001/clodfarm:latest
     build: .
-    container_name: claude-farm
+    container_name: clodfarm
     restart: unless-stopped
     env_file:
       - path: .env
         required: false
     environment:
-      FARM_CONTAINER_NAME: claude-farm
+      FARM_CONTAINER_NAME: clodfarm
     volumes:
       - claude-home:/home/farm/.claude   # your login and Claude Code state
       - workspace:/workspace             # the repo the agents work in, and the farm's SQLite store

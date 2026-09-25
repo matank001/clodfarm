@@ -16,13 +16,13 @@ When Claude Code runs headless with `--output-format stream-json --verbose`, it 
 ```
 
 These are the account's own limits as Anthropic's API reports them, and they cover **everything** on the account:
-all farms, all Remote Control sessions and your own use of Claude. claude-farm stores the newest one in DynamoDB
+all farms, all Remote Control sessions and your own use of Claude. clodfarm stores the newest one in DynamoDB
 (`BUDGET/LATEST`, written only if newer) and never estimates from token counts.
 
-Before the first run there's no data. The governor then allows one agent, which measures. `claude-farm budget
+Before the first run there's no data. The governor then allows one agent, which measures. `clodfarm budget
 --refresh` makes one tiny call to measure on demand.
 
-## The rules (`claude_farm/governor.py`, applied in order)
+## The rules (`clodfarm/governor.py`, applied in order)
 
 1. **Money:** if the account is drawing on paid overage and `FARM_ALLOW_OVERAGE=0` (the default), run nothing.
 2. **Hard stops**, each lasting until that window resets:
@@ -65,8 +65,8 @@ worker on every box pauses until the reported reset time.
 |---|---|
 | more room for yourself | `FARM_WEEKLY_TARGET=0.7` |
 | agents only in a quiet week | `FARM_WEEKLY_TARGET=0.5` |
-| run only at night | `claude-farm pause` / `claude-farm resume` from cron |
+| run only at night | `clodfarm pause` / `clodfarm resume` from cron |
 | more parallelism | `FARM_MAX_WORKERS=6` (and a bigger box: about 400-600 MB RAM per agent) |
 
-`claude-farm budget --json` shows the snapshot, the decision and the reasoning. Every run also stores the utilization
-before and after it (`claude-farm task show ID`), so you can see what each task cost as a share of the window.
+`clodfarm budget --json` shows the snapshot, the decision and the reasoning. Every run also stores the utilization
+before and after it (`clodfarm task show ID`), so you can see what each task cost as a share of the window.

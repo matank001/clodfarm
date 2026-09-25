@@ -1,4 +1,4 @@
-# How claude-farm is tested
+# How clodfarm is tested
 
 ## Automated (`pytest`, runs in CI)
 
@@ -37,18 +37,18 @@ The task: write `strutil.slugify` yourself, delegate `truncate` to exactly one s
   - Parent run 32.5 s (1,374 output tokens), child 28.3 s (1,270), resumed parent 37.1 s (396).
   - The parent merged the child branch without conflicts.
   - 11 tests passed, main was linear (`init`, `slugify`, `truncate`), and no task branches were left.
-  - `claude-farm budget` showed the account at 9% of the 5-hour window and 18% of the 7-day window, as reported by
+  - `clodfarm budget` showed the account at 9% of the 5-hour window and 18% of the 7-day window, as reported by
     Claude Code.
 
 **2026-09-25, AWS eu-central-1, `deploy/aws/deploy.sh up`, t4g.medium.**
 - The stack was created, the image built on the box, and the container started. It printed the login banner and
   waited.
-- `claude-farm doctor` passed for the claude binary (2.1.274), DynamoDB through the instance role, git and the
+- `clodfarm doctor` passed for the claude binary (2.1.274), DynamoDB through the instance role, git and the
   workspace. It failed only on the login, as expected before logging in.
-- **Remote login:** `deploy/aws/deploy.sh login` opened an SSM session into `claude-farm login`. The owner opened the
+- **Remote login:** `deploy/aws/deploy.sh login` opened an SSM session into `clodfarm login`. The owner opened the
   URL, approved, and pasted the code. The farm noticed within seconds (`authenticated: claude.ai (team)`) and started.
 - **Test 1 found two bugs, both fixed:**
-  - Remote Control hung silently on its one-time "Enable Remote Control? (y/n)" prompt. claude-farm now pre-answers
+  - Remote Control hung silently on its one-time "Enable Remote Control? (y/n)" prompt. clodfarm now pre-answers
     it when `FARM_REMOTE_CONTROL=1`.
   - The end-of-run auto-commit swept `__pycache__` into commits. The parent's later rebase then failed with
     "untracked working tree files would be overwritten", and each resolve-conflict task hit it again. Build
@@ -59,7 +59,7 @@ The task: write `strutil.slugify` yourself, delegate `truncate` to exactly one s
   - The parent implemented slugify, spawned one sub-agent for truncate (29 s), and was resumed (14 s).
   - The check passed, 2 commits merged onto main, no build artifacts were committed and no conflict tasks were
     created.
-  - `claude-farm budget` read 14% of the 5-hour window and 21% of the 7-day window from the live
+  - `clodfarm budget` read 14% of the 5-hour window and 21% of the 7-day window from the live
     `rate_limit_event`. DynamoDB access worked through the instance role, with no keys on the box.
 
 **2026-09-25, AWS, after the store rewrite (SQLite + DynamoDB behind one interface):**

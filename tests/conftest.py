@@ -80,8 +80,8 @@ def env(tmp_path, backend, request, monkeypatch):
 
 @pytest.fixture
 def store(env):
-    from claude_farm.config import load
-    from claude_farm.store import Store
+    from clodfarm.config import load
+    from clodfarm.store import Store
     s = Store.from_config(load())
     s.ensure_table()
     return s
@@ -89,5 +89,5 @@ def store(env):
 
 def cli(*args, check=True, extra_env=None):
     """Run the CLI in a subprocess, as an agent would."""
-    return subprocess.run([sys.executable, "-m", "claude_farm", *args], capture_output=True, text=True, check=check,
+    return subprocess.run([sys.executable, "-m", "clodfarm", *args], capture_output=True, text=True, check=check,
                           env={**os.environ, **(extra_env or {})})

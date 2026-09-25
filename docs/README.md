@@ -1,4 +1,4 @@
-# claude-farm docs
+# clodfarm docs
 
 | Guide | What's in it |
 |---|---|

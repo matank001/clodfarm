@@ -1,6 +1,6 @@
 # Logging in to your Claude subscription
 
-claude-farm runs the official `claude` CLI, so it logs in the same way Claude Code does. claude-farm never reads,
+clodfarm runs the official `claude` CLI, so it logs in the same way Claude Code does. clodfarm never reads,
 copies, logs or transmits your credentials. It only asks `claude auth status` whether a login exists, and it prints
 instructions until one does.
 
@@ -11,18 +11,18 @@ upgrades and `docker compose down` (without `-v`) keep you logged in.
 ## A. Log in remotely (recommended)
 
 ```bash
-docker exec -it claude-farm claude-farm login          # local or any Docker host
-ssh -t myserver docker exec -it claude-farm claude-farm login
+docker exec -it clodfarm clodfarm login          # local or any Docker host
+ssh -t myserver docker exec -it clodfarm clodfarm login
 deploy/aws/deploy.sh login                        # the AWS deploy, over SSM Session Manager
 ```
 
-`claude-farm login` runs `claude auth login`. Because the container has no browser, Claude Code prints a URL. Open it on
+`clodfarm login` runs `claude auth login`. Because the container has no browser, Claude Code prints a URL. Open it on
 any device where you're signed in to Claude (a phone is fine), approve, copy the code it shows and paste it back into
 the terminal. The farm notices the login within a few seconds and starts. No inbound port is needed.
 
 This is a full Claude Code login, the same as on a laptop, so Remote Control works with it.
 
-Switch accounts with `claude-farm login --force`. Log out with `claude-farm logout`, or delete the volume.
+Switch accounts with `clodfarm login --force`. Log out with `clodfarm logout`, or delete the volume.
 
 ## B. A long-lived token (`claude setup-token`)
 
@@ -60,5 +60,5 @@ copying it, or log in separately with A (every login is its own session).
 ## Which account?
 
 Use your own subscription for your own work. For a team, give each person or each farm its own seat (Claude Team or
-Enterprise). claude-farm deliberately has no feature for switching between accounts to get around limits, and it won't
+Enterprise). clodfarm deliberately has no feature for switching between accounts to get around limits, and it won't
 get one.

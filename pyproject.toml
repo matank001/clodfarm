@@ -3,7 +3,7 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "claude-farm"
+name = "clodfarm"
 dynamic = ["version"]
 description = "Always-on Claude Code agents in a container: Remote Control, sub-agents, a shared queue, and a budget governor that paces each account on its real 5-hour and weekly usage."
 readme = "README.md"
@@ -34,19 +34,19 @@ classifiers = [
 test = ["pytest>=7", "moto[dynamodb,server]>=5"]
 
 [project.scripts]
-claude-farm = "claude_farm.cli:main"
+clodfarm = "clodfarm.cli:main"
 
 [project.urls]
-Homepage = "https://github.com/matank001/claude-farm"
-Documentation = "https://github.com/matank001/claude-farm/tree/main/docs"
-Issues = "https://github.com/matank001/claude-farm/issues"
-Changelog = "https://github.com/matank001/claude-farm/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/matank001/clodfarm"
+Documentation = "https://github.com/matank001/clodfarm/tree/main/docs"
+Issues = "https://github.com/matank001/clodfarm/issues"
+Changelog = "https://github.com/matank001/clodfarm/blob/main/CHANGELOG.md"
 
 [tool.setuptools]
-packages = ["claude_farm"]
+packages = ["clodfarm"]
 
 [tool.setuptools.dynamic]
-version = {attr = "claude_farm.__version__"}
+version = {attr = "clodfarm.__version__"}
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

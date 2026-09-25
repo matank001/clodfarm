@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Description: >-
-  claude-farm - always-on Claude Code agents on your Claude subscription. One EC2 box (arm64, no inbound ports,
-  reached through SSM Session Manager) running the claude-farm container, and a DynamoDB table for the task queue
+  clodfarm - always-on Claude Code agents on your Claude subscription. One EC2 box (arm64, no inbound ports,
+  reached through SSM Session Manager) running the clodfarm container, and a DynamoDB table for the task queue
   and the shared budget. Log in afterwards with deploy/aws/deploy.sh login.
 
 Parameters:
@@ -15,8 +15,8 @@ Parameters:
     MinValue: 16
   RepoUrl:
     Type: String
-    Default: https://github.com/matank001/claude-farm.git
-    Description: Where the box gets claude-farm from (built on the box).
+    Default: https://github.com/matank001/clodfarm.git
+    Description: Where the box gets clodfarm from (built on the box).
   RepoRef:
     Type: String
     Default: main
@@ -79,7 +79,7 @@ Resources:
   NoInbound:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: claude-farm - no inbound; Remote Control, the Claude API and SSM are all outbound HTTPS
+      GroupDescription: clodfarm - no inbound; Remote Control, the Claude API and SSM are all outbound HTTPS
       VpcId: !Ref Vpc
       SecurityGroupEgress: [{IpProtocol: "-1", CidrIp: 0.0.0.0/0}]
 
@@ -113,7 +113,7 @@ Resources:
         Statement: [{Effect: Allow, Principal: {Service: ec2.amazonaws.com}, Action: sts:AssumeRole}]
       ManagedPolicyArns: [arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore]
       Policies:
-        - PolicyName: claude-farm-table
+        - PolicyName: clodfarm-table
           PolicyDocument:
             Version: "2012-10-17"
             Statement:
@@ -149,21 +149,21 @@ Resources:
           - |
             #!/bin/bash
             set -euxo pipefail
-            exec > >(tee /var/log/claude-farm-setup.log) 2>&1
+            exec > >(tee /var/log/clodfarm-setup.log) 2>&1
             export DEBIAN_FRONTEND=noninteractive
             apt-get update
             apt-get install -y docker.io docker-compose-v2 git
             systemctl enable --now docker
             fallocate -l 4G /swapfile && chmod 600 /swapfile && mkswap /swapfile && swapon /swapfile && echo '/swapfile none swap sw 0 0' >> /etc/fstab
-            mkdir -p /opt/claude-farm
-            if [ ! -f /opt/claude-farm/docker-compose.yml ]; then
+            mkdir -p /opt/clodfarm
+            if [ ! -f /opt/clodfarm/docker-compose.yml ]; then
               if [ -n "${SourceTarball}" ]; then
-                curl -fsSL "${SourceTarball}" | tar xz -C /opt/claude-farm --strip-components=1
+                curl -fsSL "${SourceTarball}" | tar xz -C /opt/clodfarm --strip-components=1
               else
-                git clone --depth 1 --branch ${RepoRef} ${RepoUrl} /opt/claude-farm
+                git clone --depth 1 --branch ${RepoRef} ${RepoUrl} /opt/clodfarm
               fi
             fi
-            cat > /opt/claude-farm/.env <<EOF
+            cat > /opt/clodfarm/.env <<EOF
             AWS_REGION=${AWS::Region}
             FARM_STORE=dynamodb
             FARM_TABLE=${Tbl}
@@ -172,9 +172,9 @@ Resources:
             FARM_MAX_WORKERS=${MaxWorkers}
             FARM_REPO_URL=${WorkspaceRepo}
             EOF
-            sed -i 's/^ *//' /opt/claude-farm/.env
-            if [ -f /opt/claude-farm/docker-compose.yml ]; then
-              cd /opt/claude-farm && docker compose up -d --build
+            sed -i 's/^ *//' /opt/clodfarm/.env
+            if [ -f /opt/clodfarm/docker-compose.yml ]; then
+              cd /opt/clodfarm && docker compose up -d --build
             fi
           - {Tbl: !If [OwnTable, !Ref AWS::StackName, !Ref TableName]}
 
@@ -185,6 +185,6 @@ Outputs:
     Value: !If [OwnTable, !Ref AWS::StackName, !Ref TableName]
   Login:
     Description: Log in to your Claude subscription (needs the AWS CLI and the Session Manager plugin)
-    Value: !Sub "aws ssm start-session --region ${AWS::Region} --target ${Instance} --document-name AWS-StartInteractiveCommand --parameters command='sudo docker exec -it claude-farm claude-farm login'"
+    Value: !Sub "aws ssm start-session --region ${AWS::Region} --target ${Instance} --document-name AWS-StartInteractiveCommand --parameters command='sudo docker exec -it clodfarm clodfarm login'"
   Status:
-    Value: !Sub "aws ssm start-session --region ${AWS::Region} --target ${Instance} --document-name AWS-StartInteractiveCommand --parameters command='sudo docker exec -it claude-farm claude-farm status'"
+    Value: !Sub "aws ssm start-session --region ${AWS::Region} --target ${Instance} --document-name AWS-StartInteractiveCommand --parameters command='sudo docker exec -it clodfarm clodfarm status'"

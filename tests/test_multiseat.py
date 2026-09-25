@@ -5,10 +5,10 @@ import threading
 import time
 
 from conftest import cli
-from claude_farm.config import load
-from claude_farm.governor import Snapshot
-from claude_farm.store import Store
-from claude_farm.supervisor import Farm
+from clodfarm.config import load
+from clodfarm.governor import Snapshot
+from clodfarm.store import Store
+from clodfarm.supervisor import Farm
 from test_farm import stop_farm, wait_for
 
 

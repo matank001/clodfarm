@@ -6,10 +6,10 @@ import threading
 import time
 
 from conftest import cli
-from claude_farm.config import load
-from claude_farm.governor import decide
-from claude_farm.store import Store
-from claude_farm.supervisor import Farm
+from clodfarm.config import load
+from clodfarm.governor import decide
+from clodfarm.store import Store
+from clodfarm.supervisor import Farm
 
 
 def start_farm():
@@ -150,8 +150,8 @@ def test_agents_get_the_farm_guide(env):
         wait_for(lambda: farm.store.get_task(tid)["status"] == "done")
         run = [c for c in calls(env) if c.get("task") == tid][0]
         sysprompt = run["argv"][run["argv"].index("--append-system-prompt") + 1]
-        assert "claude-farm task add" in sysprompt and tid in sysprompt
-        assert "claude-farm:guide:start" in open(env / "claude-home" / "CLAUDE.md").read()
+        assert "clodfarm task add" in sysprompt and tid in sysprompt
+        assert "clodfarm:guide:start" in open(env / "claude-home" / "CLAUDE.md").read()
     finally:
         stop_farm(farm, t)
 

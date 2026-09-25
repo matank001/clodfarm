@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 560" width="1280" height="560" role="img" aria-labelledby="t d">
-<title id="t">claude-farm</title><desc id="d">A night-time farm: rows of glowing terminal sprouts are Claude Code agents at work, a barn and a silo hold the task queue, and the moon is a budget gauge showing the 5-hour and weekly usage windows.</desc>
+<title id="t">clodfarm</title><desc id="d">A night-time farm: rows of glowing terminal sprouts are Claude Code agents at work, a barn and a silo hold the task queue, and the moon is a budget gauge showing the 5-hour and weekly usage windows.</desc>
 <defs>
 <linearGradient id="sky" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#070B1C"/><stop offset=".55" stop-color="#141B3D"/><stop offset="1" stop-color="#3B2A4A"/></linearGradient>
 <linearGradient id="hillB" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#1D2B3F"/><stop offset="1" stop-color="#131D2C"/></linearGradient>
@@ -188,8 +188,8 @@
 <path d="M1036,560 C1036,547.4 1036,541.1 1036,534.8" stroke="#4E8C5A" stroke-width="3.8" fill="none"/><path d="M1036,550.5 C1020.2,544.2 1014.0,553.7 1010.8,556.9 C1023.4,560.0 1031.3,556.9 1036,550.5 Z" fill="#5FA56B"/><path d="M1036,545.8 C1051.8,538.0 1058.0,547.4 1062.8,550.5 C1050.2,555.3 1040.7,552.1 1036,545.8 Z" fill="#5FA56B"/><rect x="1015.5" y="504.9" width="40.9" height="29.9" rx="6.3" fill="#101A16" stroke="#3E5A48" stroke-width="2.5"/><text x="1021.8" y="526.5" font-family="ui-monospace,Menlo,monospace" font-size="15.8" fill="#5B7A66">&gt;_</text>
 <circle cx="1234" cy="522.2" r="47.2" fill="url(#sproutGlow)"/><path d="M1234,560 C1234,547.4 1234,541.1 1234,534.8" stroke="#4E8C5A" stroke-width="3.8" fill="none"/><path d="M1234,550.5 C1218.2,544.2 1212.0,553.7 1208.8,556.9 C1221.4,560.0 1229.3,556.9 1234,550.5 Z" fill="#5FA56B"/><path d="M1234,545.8 C1249.8,538.0 1256.0,547.4 1260.8,550.5 C1248.2,555.3 1238.7,552.1 1234,545.8 Z" fill="#5FA56B"/><rect x="1213.5" y="504.9" width="40.9" height="29.9" rx="6.3" fill="#23130F" stroke="#E8875B" stroke-width="2.5"/><text x="1219.8" y="526.5" font-family="ui-monospace,Menlo,monospace" font-size="15.8" fill="#FFD2B8">&gt;_</text>
 <g font-family="-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Helvetica,Arial,sans-serif">
-<text x="72" y="128" font-size="74" font-weight="800" fill="#F7EFE4" letter-spacing="-1.5">claude<tspan fill="#E8875B">-</tspan>farm</text>
-<text x="76" y="176" font-size="24" fill="#C9CEE0">Always-on Claude Code agents that pace themselves.</text>
+<text x="72" y="128" font-size="78" font-weight="800" fill="#F7EFE4" letter-spacing="-1.5">clod<tspan fill="#E8875B">farm</tspan></text>
+<text x="76" y="176" font-size="24" fill="#C9CEE0">A farm of Claude Code agents. Plant a mission, harvest the PRs.</text>
 <text x="76" y="210" font-size="17" fill="#8E97B5">Remote Control · sub-agents · one queue · a budget per seat</text>
 </g>
 </g></svg>

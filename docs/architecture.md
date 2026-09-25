@@ -1,6 +1,6 @@
 # Architecture
 
-claude-farm is a small Python daemon (`claude-farm run`; the standard library plus boto3) that supervises Claude
+clodfarm is a small Python daemon (`clodfarm run`; the standard library plus boto3) that supervises Claude
 Code processes and keeps its state in one store:
 - **SQLite**, one file in the workspace volume, for a single box (the default);
 - **a DynamoDB table** (`FARM_STORE=dynamodb`) when several boxes and accounts share one farm.
@@ -10,7 +10,7 @@ Every update is an optimistic, versioned read-modify-write, so claims and counte
 
 ```
 container (user "farm", tini as PID 1)
-└── claude-farm run                       supervisor.py
+└── clodfarm run                       supervisor.py
     ├── remote-control keeper          `claude remote-control --name $FARM_NAME --spawn worktree`, restarted with back-off
     ├── worker w0..wN-1                one thread each, never more than FARM_MAX_WORKERS
     │     └── claude -p --output-format stream-json --verbose --append-system-prompt <farm guide> ...
@@ -29,7 +29,7 @@ container (user "farm", tini as PID 1)
 | `gitops.py` | One worktree and branch per task; rebase onto main plus fast-forward; conflicts become tasks. |
 | `prompts.py` | The farm guide every agent gets, the planner prompt and the resume prompt. |
 | `auth.py` | Login detection, the waiting banner, onboarding and trust flags, the guide in `CLAUDE.md`. |
-| `cli.py` | The `claude-farm` command, shared by humans and agents. |
+| `cli.py` | The `clodfarm` command, shared by humans and agents. |
 
 ## Data model (one table, same shape in SQLite and DynamoDB)
 
@@ -94,12 +94,12 @@ on first start, so that only happens if you remove it.
 | The agent process crashes | The attempt counts. The task is re-queued until `max_attempts` (3), then marked `failed` with the output. |
 | The agent run times out | The session is resumed ("you hit the time limit; commit what's good and finish or split") up to `FARM_TIMEOUT_RESUMES` (2) times, keeping the work and the attempt. |
 | `FARM_VERIFY_CMD` fails before landing | The branch is rebased onto main and the check runs in the worktree. On failure the agent is resumed with the output, up to `FARM_VERIFY_FIXES` (2) times. After that the task fails and main is untouched. |
-| Many failures in a row | After `FARM_STALL_THRESHOLD` (5) failed runs in a row on any box, the circuit breaker pauses the whole farm and notifies you. `claude-farm resume` resets it. |
+| Many failures in a row | After `FARM_STALL_THRESHOLD` (5) failed runs in a row on any box, the circuit breaker pauses the whole farm and notifies you. `clodfarm resume` resets it. |
 | The container or box dies mid-run | The lease (5 min, renewed every ~100 s) expires. Housekeeping on any box re-queues the task. The slot lease expires too. |
 | DynamoDB is briefly unreachable | Worker threads log and retry after 30 s. The event log never raises. |
 | Remote Control exits | Restarted after 10 s, with exponential back-off up to 30 min if it keeps failing fast. |
 | Usage limit | See [budget.md](budget.md): the attempt is handed back and the whole account pauses until the reset. |
-| Logged out (token revoked) | Runs fail with auth errors. `claude-farm doctor` shows it. Log in again with `claude-farm login`. |
+| Logged out (token revoked) | Runs fail with auth errors. `clodfarm doctor` shows it. Log in again with `clodfarm login`. |
 
 ## Scaling out
 
@@ -112,9 +112,9 @@ Run the same image on more boxes with the same `FARM_TABLE` (real DynamoDB) and 
 
 See [multi-seat.md](multi-seat.md).
 
-## What claude-farm deliberately doesn't do
+## What clodfarm deliberately doesn't do
 
 - No web UI. The Claude app (Remote Control), the CLI and `docker logs` cover it.
 - No multi-account pooling, no API-key fallback and no limit evasion.
 - No outbound messages, payments or posting. Agents are told not to unless your mission says so, and nothing in
-  claude-farm itself does any of it.
+  clodfarm itself does any of it.

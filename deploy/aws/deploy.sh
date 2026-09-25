@@ -1,17 +1,17 @@
 #!/usr/bin/env bash
-# claude-farm on AWS, one command per step. Needs the AWS CLI v2 and, for login/status/shell,
+# clodfarm on AWS, one command per step. Needs the AWS CLI v2 and, for login/status/shell,
 # the Session Manager plugin: https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html
 #
 #   deploy/aws/deploy.sh up [--max-workers 3] [--instance-type t4g.medium] [--workspace-repo URL]
 #   deploy/aws/deploy.sh login      # log in to your Claude subscription on the box (URL + code)
-#   deploy/aws/deploy.sh status     # claude-farm status on the box
+#   deploy/aws/deploy.sh status     # clodfarm status on the box
 #   deploy/aws/deploy.sh logs       # follow the container logs
 #   deploy/aws/deploy.sh shell      # a shell inside the container
 #   deploy/aws/deploy.sh down       # delete the stack (the DynamoDB table is kept)
 #
-# Env: STACK (default claude-farm), STACK_TAGS (extra "Key=Value ..." tags), AWS_REGION / AWS_PROFILE as usual.
+# Env: STACK (default clodfarm), STACK_TAGS (extra "Key=Value ..." tags), AWS_REGION / AWS_PROFILE as usual.
 set -euo pipefail
-STACK=${STACK:-claude-farm}
+STACK=${STACK:-clodfarm}
 HERE="$(cd "$(dirname "$0")" && pwd)"
 REGION=${AWS_REGION:-$(aws configure get region || echo us-east-1)}
 cmd=${1:-help}; shift || true
@@ -28,7 +28,7 @@ wait_ready() {
   for _ in $(seq 1 90); do
     local cid st
     cid=$(aws ssm send-command --region "$REGION" --instance-ids "$id" --document-name AWS-RunShellScript \
-          --parameters 'commands=["docker inspect -f {{.State.Running}} claude-farm 2>/dev/null || echo no"]' \
+          --parameters 'commands=["docker inspect -f {{.State.Running}} clodfarm 2>/dev/null || echo no"]' \
           --query Command.CommandId --output text 2>/dev/null) || { sleep 10; continue; }
     sleep 5
     st=$(aws ssm get-command-invocation --region "$REGION" --command-id "$cid" --instance-id "$id" \
@@ -56,21 +56,21 @@ case "$cmd" in
       esac
     done
     aws cloudformation deploy --region "$REGION" --stack-name "$STACK" --template-file "$HERE/template.yaml" \
-      --capabilities CAPABILITY_IAM --no-fail-on-empty-changeset --tags app=claude-farm ${STACK_TAGS:-} \
+      --capabilities CAPABILITY_IAM --no-fail-on-empty-changeset --tags app=clodfarm ${STACK_TAGS:-} \
       ${params[@]+--parameter-overrides "${params[@]}"}
     wait_ready || true
     cat <<EOF
 
-claude-farm is deployed (stack $STACK, instance $(out InstanceId), table $(out Table)).
+clodfarm is deployed (stack $STACK, instance $(out InstanceId), table $(out Table)).
 Next: log in to your Claude subscription. It prints a URL; open it anywhere, approve, paste the code back:
 
   $0 login
 EOF
     ;;
-  login)  on_box "sudo docker exec -it claude-farm claude-farm login" ;;
-  status) on_box "sudo docker exec -it claude-farm claude-farm status" ;;
-  logs)   on_box "sudo docker logs -f --tail 100 claude-farm" ;;
-  shell)  on_box "sudo docker exec -it claude-farm bash" ;;
+  login)  on_box "sudo docker exec -it clodfarm clodfarm login" ;;
+  status) on_box "sudo docker exec -it clodfarm clodfarm status" ;;
+  logs)   on_box "sudo docker logs -f --tail 100 clodfarm" ;;
+  shell)  on_box "sudo docker exec -it clodfarm bash" ;;
   down)
     aws cloudformation delete-stack --region "$REGION" --stack-name "$STACK"
     aws cloudformation wait stack-delete-complete --region "$REGION" --stack-name "$STACK"

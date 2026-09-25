@@ -1,6 +1,6 @@
 # Security model
 
-claude-farm gives autonomous agents a shell. Be deliberate about what that shell can reach.
+clodfarm gives autonomous agents a shell. Be deliberate about what that shell can reach.
 
 ## What the agents can do
 
@@ -29,7 +29,7 @@ claude-farm gives autonomous agents a shell. Be deliberate about what that shell
 6. **Token hygiene:** if you use `CLAUDE_CODE_OAUTH_TOKEN`, keep `.env` out of git and prefer a secret store.
    Revoke tokens you no longer use.
 
-## What claude-farm itself does and doesn't do
+## What clodfarm itself does and doesn't do
 
 - It never reads your credentials. It runs `claude auth status` and prints what that reports: logged in or not, the
   plan type, the email.

@@ -2,7 +2,7 @@
 """A stand-in for the `claude` binary that speaks the same stream-json protocol.
 
 Behaviour is driven by words in the prompt, so tests can script agents:
-  SPAWN <n>     add n sub-tasks with `claude-farm task add --parent $FARM_TASK_ID`
+  SPAWN <n>     add n sub-tasks with `clodfarm task add --parent $FARM_TASK_ID`
   PLAN <n>      (planner) add n top-level tasks
   COMMIT <name> write <name>.txt in the working directory and git-commit it
   REJECT        report a rejected rate limit and fail
@@ -34,7 +34,7 @@ def log(entry):
 
 
 def farm_cli(*args):
-    subprocess.run([sys.executable, "-m", "claude_farm", *args], check=True, capture_output=True, text=True)
+    subprocess.run([sys.executable, "-m", "clodfarm", *args], check=True, capture_output=True, text=True)
 
 
 def main(argv):

@@ -4,7 +4,7 @@
 
 First public release.
 
-- `claude-farm run`: a supervisor with a Remote Control keeper and N headless Claude Code workers.
+- `clodfarm run`: a supervisor with a Remote Control keeper and N headless Claude Code workers.
 - DynamoDB single-table queue: priorities, leases, retries, parent and child tasks, resuming a parent in its own
   session.
 - Budget governor on Claude Code's real `rate_limit_event` utilization: weekly pacing (80% target by default), a
@@ -13,11 +13,11 @@ First public release.
 - A git worktree per task. Sub-tasks branch from their parent, and top-level tasks rebase and fast-forward into main.
 - Docker image, docker compose with DynamoDB Local, and an AWS CloudFormation deploy with no inbound ports.
 - **Zero-setup single box:** a built-in SQLite store (no database to run), a one-line installer, an optional `.env`,
-  and `claude-farm mission`. DynamoDB only when one farm spans several boxes (`FARM_STORE=dynamodb`).
+  and `clodfarm mission`. DynamoDB only when one farm spans several boxes (`FARM_STORE=dynamodb`).
 - **Several Claude accounts in one farm:** a per-seat budget, slots and spend, a shared queue, task branches shared
-  through origin, and session affinity for resumed parents. `claude-farm budget` and `status` show every seat.
+  through origin, and session affinity for resumed parents. `clodfarm budget` and `status` show every seat.
 - Quality gate (`FARM_VERIFY_CMD`): check the rebased branch before it lands; resume the agent to fix failures.
 - Timeouts resume the session instead of starting over; a circuit breaker pauses the farm after repeated failures.
 - Notifications to ntfy, Slack or Discord (`FARM_NOTIFY_URL`); `FARM_EFFORT`.
 - Usage-limit detection reads only structured events and error results, never the agent's own text.
-- Login three ways: remote `claude-farm login`, a `claude setup-token` token, or an existing Linux profile.
+- Login three ways: remote `clodfarm login`, a `claude setup-token` token, or an existing Linux profile.

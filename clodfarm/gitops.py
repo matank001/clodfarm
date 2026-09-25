@@ -37,7 +37,7 @@ coverage/
 .DS_Store
 *.log
 """
-_EXCLUDE_MARK = "# claude-farm defaults"
+_EXCLUDE_MARK = "# clodfarm defaults"
 
 
 class GitError(RuntimeError):
@@ -83,7 +83,7 @@ def write_mission(repo: str, text: str) -> str:
     if is_repo(repo):
         git(repo, "add", "MISSION.md")
         if git(repo, "status", "--porcelain", "MISSION.md", check=False):
-            git(repo, "-c", "user.name=claude-farm", "-c", "user.email=claude-farm@localhost", "commit", "-qm",
+            git(repo, "-c", "user.name=clodfarm", "-c", "user.email=clodfarm@localhost", "commit", "-qm",
                 "mission: update MISSION.md", check=False)
     return path
 
@@ -121,9 +121,9 @@ def ensure_repo(repo: str, url: str | None):
         os.makedirs(repo, exist_ok=True)
         git(repo, "init", "-q", "-b", "main")
         with open(os.path.join(repo, "README.md"), "w") as f:
-            f.write("# workspace\n\nManaged by claude-farm. Put your MISSION.md here.\n")
+            f.write("# workspace\n\nManaged by clodfarm. Put your MISSION.md here.\n")
         git(repo, "add", "-A")
-        git(repo, "-c", "user.name=claude-farm", "-c", "user.email=claude-farm@localhost",
+        git(repo, "-c", "user.name=clodfarm", "-c", "user.email=clodfarm@localhost",
             "commit", "-qm", "init workspace")
     ensure_excludes(repo)
 
@@ -158,7 +158,7 @@ def commit_leftovers(path: str, branch: str) -> bool:
     if not git(path, "status", "--porcelain", check=False):
         return False
     git(path, "add", "-A")
-    git(path, "-c", "user.name=claude-farm", "-c", "user.email=claude-farm@localhost",
+    git(path, "-c", "user.name=clodfarm", "-c", "user.email=clodfarm@localhost",
         "commit", "-qm", f"{branch}: uncommitted work at end of run")
     return True
 
@@ -222,7 +222,7 @@ def remove_worktree(repo: str, path: str, branch: str | None = None):
 
 
 def prune_merged(repo: str) -> int:
-    """Delete claude-farm/* branches that main already contains and that no worktree uses."""
+    """Delete clodfarm/* branches that main already contains and that no worktree uses."""
     with _lock:
         base = main_branch(repo)
         used = {l.split()[1].replace("refs/heads/", "") for l in git(repo, "worktree", "list", "--porcelain",

@@ -30,7 +30,7 @@ class Backend:
 
 # ------------------------------------------------------------------ SQLite
 class SqliteBackend(Backend):
-    """One file. Safe for many threads and for `docker exec claude-farm ...` processes at once (WAL, busy timeout)."""
+    """One file. Safe for many threads and for `docker exec clodfarm ...` processes at once (WAL, busy timeout)."""
 
     def __init__(self, path: str):
         self.path = os.path.abspath(os.path.expanduser(path))
@@ -210,7 +210,7 @@ class DynamoBackend(Backend):
     def put(self, item, expect_ver=None):
         kw = {"Item": _to_ddb(item)}
         if expect_ver == 0:
-            # absent, or written before items carried a version (an older claude-farm): adopt it
+            # absent, or written before items carried a version (an older clodfarm): adopt it
             kw["ConditionExpression"] = self._Attr("PK").not_exists() | self._Attr("ver").not_exists()
         elif expect_ver is not None:
             kw["ConditionExpression"] = self._Attr("ver").eq(expect_ver)

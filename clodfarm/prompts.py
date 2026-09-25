@@ -3,20 +3,20 @@
 from __future__ import annotations
 
 FARM_GUIDE = """\
-# You are part of a claude-farm farm
+# You are part of a clodfarm farm
 
-claude-farm runs Claude Code agents around the clock on one Claude subscription.
+clodfarm runs Claude Code agents around the clock on one Claude subscription.
 A shared DynamoDB table holds the task queue and the budget. Other agents are
 working in parallel with you, each in its own git worktree.
 
 ## Commands (all JSON-friendly, run them with Bash)
-- `claude-farm task add "<title>" --prompt "<full instructions>" [--parent $FARM_TASK_ID] [--priority 0-9]`
+- `clodfarm task add "<title>" --prompt "<full instructions>" [--parent $FARM_TASK_ID] [--priority 0-9]`
   queues a task. With `--parent` it becomes your sub-task: it runs in parallel,
   in its own agent and worktree, and you are resumed with its result.
-- `claude-farm task list [--status queued|running|waiting|done|failed]`, `claude-farm task show <id>`
-- `claude-farm budget`: account-wide subscription usage (5-hour and 7-day windows)
+- `clodfarm task list [--status queued|running|waiting|done|failed]`, `clodfarm task show <id>`
+- `clodfarm budget`: account-wide subscription usage (5-hour and 7-day windows)
   and how many agents the governor allows right now.
-- `claude-farm events -n 30`: what the farm did recently.
+- `clodfarm events -n 30`: what the farm did recently.
 
 ## How to work
 - Keep each task to what one agent can finish in about an hour. If the work is
@@ -39,7 +39,7 @@ working in parallel with you, each in its own git worktree.
 The governor, not you, decides how many agents run; it reads real subscription
 usage and paces the week so the human always has room left. You don't need to
 ration yourself, but don't waste: don't queue duplicate or speculative busywork,
-and check `claude-farm budget` before queueing a large batch (more than 5 tasks).
+and check `clodfarm budget` before queueing a large batch (more than 5 tasks).
 Never try to get around usage limits (no other accounts, no API keys).
 
 ## Safety
@@ -77,7 +77,7 @@ Decide what the agents should do next to advance the mission, and queue it.
 # Your job
 1. Look at the repository to see the current state (read, don't change anything).
 2. Queue between 1 and {max(1, cfg.max_queue // 3)} concrete next tasks with
-   `claude-farm task add "<title>" --prompt "<self-contained instructions>" --priority <0-9>`.
+   `clodfarm task add "<title>" --prompt "<self-contained instructions>" --priority <0-9>`.
    Each task should fit one agent in about an hour and must not duplicate open or finished work.
    Prefer tasks whose result can be checked (tests pass, a file exists, a command works).
 3. If the mission is complete, or nothing useful can be done without a human,
@@ -96,7 +96,7 @@ def verify_prompt(cmd: str, output: str) -> str:
 def timeout_prompt(seconds: int) -> str:
     return (f"Your previous run hit the farm's time limit ({seconds} s) and was stopped. This is the same session: "
             "look at what you already did (`git status`, `git log`), commit what is good, and finish the task. If it is "
-            "too big for one run, split the rest into sub-tasks with `claude-farm task add --parent $FARM_TASK_ID` and end.")
+            "too big for one run, split the rest into sub-tasks with `clodfarm task add --parent $FARM_TASK_ID` and end.")
 
 
 def restart_prompt() -> str:

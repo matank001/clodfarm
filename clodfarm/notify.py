@@ -27,7 +27,7 @@ def send(url: str, title: str, text: str, farm: str = "") -> None:
     def go():
         try:
             data, headers = _payload(url, title, text[:1500])
-            req = urllib.request.Request(url, data=data, headers={"User-Agent": "claude-farm", **headers}, method="POST")
+            req = urllib.request.Request(url, data=data, headers={"User-Agent": "clodfarm", **headers}, method="POST")
             urllib.request.urlopen(req, timeout=8).close()
         except Exception:  # noqa: BLE001
             pass

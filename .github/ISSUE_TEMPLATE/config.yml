@@ -1,8 +1,8 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security vulnerability
-    url: https://github.com/matank001/claude-farm/security/advisories/new
+    url: https://github.com/matank001/clodfarm/security/advisories/new
     about: Please report security issues privately.
   - name: Question or idea to discuss
-    url: https://github.com/matank001/claude-farm/discussions
+    url: https://github.com/matank001/clodfarm/discussions
     about: Ask how to set something up, or share what your farm is building.

@@ -1,4 +1,4 @@
-from claude_farm.governor import FIVE_HOURS, SEVEN_DAYS, Policy, Snapshot, Window, decide
+from clodfarm.governor import FIVE_HOURS, SEVEN_DAYS, Policy, Snapshot, Window, decide
 
 NOW = 1_800_000_000.0
 P = Policy(max_workers=4, weekly_target=0.90, five_hour_ceiling=0.90, weekly_band=0.05, five_hour_band=0.30, burst_hours=12)

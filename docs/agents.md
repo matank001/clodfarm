@@ -1,17 +1,17 @@
 # What the agents know (and how to steer them)
 
 Every headless agent gets the **farm guide** appended to its system prompt (`--append-system-prompt`, text in
-`claude_farm/prompts.py`), plus a line naming its task id, depth and worktree. The same guide is written into the
-user-level `CLAUDE.md` in the container (between `claude-farm:guide` markers), so sessions you open through Remote
+`clodfarm/prompts.py`), plus a line naming its task id, depth and worktree. The same guide is written into the
+user-level `CLAUDE.md` in the container (between `clodfarm:guide` markers), so sessions you open through Remote
 Control know the farm too and can queue work for it.
 
 The guide teaches them to:
-- **Split big work:** `claude-farm task add "<title>" --prompt "<self-contained instructions>" --parent $FARM_TASK_ID`,
+- **Split big work:** `clodfarm task add "<title>" --prompt "<self-contained instructions>" --parent $FARM_TASK_ID`,
   then end the run. They're resumed in the same session with the results. They never sleep or poll.
 - **Use built-in sub-agents** (Claude Code's Agent tool) for small parallel look-ups inside one run.
 - **Commit on their branch** and not push or merge. The farm does that.
 - **End with a plain summary.** That's what the parent task and the planner read.
-- **Check `claude-farm budget`** before queueing a large batch. They leave pacing to the governor instead of
+- **Check `clodfarm budget`** before queueing a large batch. They leave pacing to the governor instead of
   rationing themselves.
 - **Stay safe:** never touch credentials; no messages, payments, account creation or public posts unless the
   mission says so.

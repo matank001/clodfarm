@@ -1,5 +1,5 @@
 name: Bug report
-description: Something in claude-farm doesn't work as documented
+description: Something in clodfarm doesn't work as documented
 labels: [bug]
 body:
   - type: markdown
@@ -14,20 +14,20 @@ body:
     id: repro
     attributes:
       label: Steps to reproduce
-      placeholder: "1. docker compose up -d\n2. claude-farm task add ...\n3. ..."
+      placeholder: "1. docker compose up -d\n2. clodfarm task add ...\n3. ..."
     validations: {required: true}
   - type: textarea
     id: logs
     attributes:
-      label: Output of `claude-farm doctor` and the relevant part of `claude-farm events`
+      label: Output of `clodfarm doctor` and the relevant part of `clodfarm events`
       render: text
   - type: input
     id: versions
     attributes:
       label: Versions
-      placeholder: "claude-farm 0.1.0, Claude Code 2.1.x, Docker 28, AWS / local"
+      placeholder: "clodfarm 0.1.0, Claude Code 2.1.x, Docker 28, AWS / local"
   - type: dropdown
     id: auth
     attributes:
       label: How is the box logged in?
-      options: [claude-farm login (subscription), setup-token, mounted profile, API key]
+      options: [clodfarm login (subscription), setup-token, mounted profile, API key]

@@ -81,10 +81,10 @@ def _store_kind() -> str:
 
 def load() -> Config:
     return Config(
-        name=_env("FARM_NAME", "claude-farm"),
+        name=_env("FARM_NAME", "clodfarm"),
         store=_store_kind(),
         db_path=_env("FARM_DB", os.path.join(_env("FARM_WORKSPACE", "/workspace"), ".farm", "farm.db")),
-        table=_env("FARM_TABLE", "claude-farm"),
+        table=_env("FARM_TABLE", "clodfarm"),
         region=_env("AWS_REGION", _env("AWS_DEFAULT_REGION", "us-east-1")),
         endpoint=os.environ.get("FARM_DYNAMODB_ENDPOINT") or None,
         workspace=_env("FARM_WORKSPACE", "/workspace"),

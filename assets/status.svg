@@ -1,12 +1,12 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 498" width="960" height="498" role="img" aria-label="Output of claude-farm status: two seats with their own budgets, Remote Control live, and the shared task queue">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 960 498" width="960" height="498" role="img" aria-label="Output of clodfarm status: two seats with their own budgets, Remote Control live, and the shared task queue">
 <rect width="960" height="498" rx="14" fill="#0D1224"/>
 <rect x="0.5" y="0.5" width="959" height="497" rx="14" fill="none" stroke="#2A3354"/>
 <circle cx="24" cy="22" r="6" fill="#F07178"/><circle cx="44" cy="22" r="6" fill="#F2C14E"/><circle cx="64" cy="22" r="6" fill="#7BC47F"/>
-<text x="480.0" y="27" text-anchor="middle" font-family="-apple-system,Segoe UI,Helvetica,sans-serif" font-size="13" fill="#7A849E">farm-1 — claude-farm</text>
+<text x="480.0" y="27" text-anchor="middle" font-family="-apple-system,Segoe UI,Helvetica,sans-serif" font-size="13" fill="#7A849E">farm-1 — clodfarm</text>
 <line x1="0" y1="42" x2="960" y2="42" stroke="#1E2645"/>
 <g font-family="ui-monospace,SFMono-Regular,Menlo,Consolas,monospace" font-size="14" xml:space="preserve">
-<text x="26" y="62"><tspan fill="#E8875B">$ </tspan><tspan fill="#F7EFE4">claude-farm status</tspan></text>
-<text x="26" y="85"><tspan fill="#D7DCEA">claude-farm 0.1.0  farm farm-1@a1c2  table </tspan><tspan fill="#F7EFE4">claude-farm</tspan></text>
+<text x="26" y="62"><tspan fill="#E8875B">$ </tspan><tspan fill="#F7EFE4">clodfarm status</tspan></text>
+<text x="26" y="85"><tspan fill="#D7DCEA">clodfarm 0.1.0  farm farm-1@a1c2  table </tspan><tspan fill="#F7EFE4">clodfarm</tspan></text>
 <text x="26" y="108"><tspan fill="#7A849E">BUDGET per Claude account (seat), from Claude Code&#x27;s own rate-limit reports; the queue is shared</tspan></text>
 <text x="26" y="131"><tspan fill="#F7EFE4">SEAT matan-3f2a</tspan><tspan fill="#7A849E">  boxes: farm-1@a1c2, farm-2@c3d4</tspan></text>
 <text x="26" y="154"><tspan fill="#D7DCEA">  5-hour </tspan><tspan fill="#E8875B">████</tspan><tspan fill="#7A849E">░░░░░░</tspan><tspan fill="#D7DCEA">  41%  agents stop at 85%   resets Fri 18:00Z (in 2.3h)</tspan></text>
@@ -16,7 +16,7 @@
 <text x="26" y="246"><tspan fill="#D7DCEA">  5-hour </tspan><tspan fill="#F07178">█████████</tspan><tspan fill="#7A849E">░</tspan><tspan fill="#D7DCEA">  87%  agents stop at 85%   resets Fri 16:40Z (in 1.7h)</tspan></text>
 <text x="26" y="269"><tspan fill="#D7DCEA">  7-day  </tspan><tspan fill="#F2C14E">███</tspan><tspan fill="#7A849E">░░░░░░░</tspan><tspan fill="#D7DCEA">  29%  agents stop at 80%   resets Tue 09:00Z (in 4.0d)</tspan></text>
 <text x="26" y="292"><tspan fill="#D7DCEA">  governor </tspan><tspan fill="#F07178">0/3 allowed</tspan><tspan fill="#D7DCEA"> · 0 running · 5-hour window at 87% (ceiling 85%)</tspan></text>
-<text x="26" y="315"><tspan fill="#8AB4F8">REMOTE</tspan><tspan fill="#D7DCEA">    Remote Control &#x27;claude-farm&#x27; is live: https://claude.ai/code/session_01K5…</tspan></text>
+<text x="26" y="315"><tspan fill="#8AB4F8">REMOTE</tspan><tspan fill="#D7DCEA">    Remote Control &#x27;clodfarm&#x27; is live: https://claude.ai/code/session_01K5…</tspan></text>
 <text x="26" y="338"><tspan fill="#8AB4F8">QUEUE</tspan><tspan fill="#D7DCEA">     queued 6  running 4  waiting 1  done 142  failed 2</tspan></text>
 <text x="26" y="361"><tspan fill="#8AB4F8">TASKS</tspan></text>
 <text x="26" y="384"><tspan fill="#D7DCEA">  2609251305a1  </tspan><tspan fill="#7BC47F">running  </tspan><tspan fill="#D7DCEA">p7  12s  Add a --align flag                    [w0]</tspan></text>

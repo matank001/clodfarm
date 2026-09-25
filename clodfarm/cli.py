@@ -1,16 +1,16 @@
-"""claude-farm command line. Humans and agents use the same commands.
+"""clodfarm command line. Humans and agents use the same commands.
 
-    claude-farm run                      start the farm daemon (the container does this)
-    claude-farm login | logout | whoami  Claude subscription login (see docs/auth.md)
-    claude-farm status                   workers, queue, budget in one screen
-    claude-farm budget [--refresh]       subscription usage and what the governor allows
-    claude-farm task add TITLE [--prompt TEXT | --prompt-file F | -] [--parent ID] [--priority 0-9]
-    claude-farm task list [--status S] | show ID | cancel ID | retry ID
-    claude-farm mission [TEXT | -f FILE]  show or set MISSION.md (the planner keeps agents busy with it)
-    claude-farm events [-n 30] [-f]      the farm's event log
-    claude-farm pause [REASON] | resume  stop or restart new work on every farm sharing the table
-    claude-farm init                     create the DynamoDB table
-    claude-farm doctor                   check claude, login, DynamoDB, git and the workspace
+    clodfarm run                      start the farm daemon (the container does this)
+    clodfarm login | logout | whoami  Claude subscription login (see docs/auth.md)
+    clodfarm status                   workers, queue, budget in one screen
+    clodfarm budget [--refresh]       subscription usage and what the governor allows
+    clodfarm task add TITLE [--prompt TEXT | --prompt-file F | -] [--parent ID] [--priority 0-9]
+    clodfarm task list [--status S] | show ID | cancel ID | retry ID
+    clodfarm mission [TEXT | -f FILE]  show or set MISSION.md (the planner keeps agents busy with it)
+    clodfarm events [-n 30] [-f]      the farm's event log
+    clodfarm pause [REASON] | resume  stop or restart new work on every farm sharing the table
+    clodfarm init                     create the DynamoDB table
+    clodfarm doctor                   check claude, login, DynamoDB, git and the workspace
 
 Add --json to status, budget, task list/show and events for machine-readable output.
 """
@@ -70,7 +70,7 @@ def cmd_login(cfg, a):
     st = auth_status(cfg.claude_bin)
     if st.get("loggedIn") and not a.force:
         print(f"Already logged in: {st.get('email') or ''} {st.get('subscriptionType') or ''} via {st.get('via')}.")
-        print("Use `claude-farm login --force` to switch accounts.")
+        print("Use `clodfarm login --force` to switch accounts.")
         return 0
     print("Starting Claude Code login. Open the URL it prints on any device, approve, and paste the code here.\n")
     rc = subprocess.call([cfg.claude_bin, "auth", "login"])
@@ -79,7 +79,7 @@ def cmd_login(cfg, a):
         print(f"\nLogged in: {st.get('email') or ''} ({st.get('subscriptionType') or 'subscription'}). "
               "The farm picks this up within a few seconds.")
         return 0
-    print("\nNot logged in yet. Run `claude-farm login` again, or see docs/auth.md for the token option.")
+    print("\nNot logged in yet. Run `clodfarm login` again, or see docs/auth.md for the token option.")
     return rc or 1
 
 
@@ -118,7 +118,7 @@ def _seat_text(r) -> str:
         cap = f"${p.daily_budget_usd:.2f}/day" if p.daily_budget_usd else "no daily cap (set FARM_DAILY_BUDGET_USD)"
         lines.append(f"  API key, list-price spend ${d.details.get('spent_today_usd', 0):.2f} today, {cap}")
     elif not snap:
-        lines.append("  no usage report yet: its first agent run measures it (or `claude-farm budget --refresh` on that box)")
+        lines.append("  no usage report yet: its first agent run measures it (or `clodfarm budget --refresh` on that box)")
     else:
         for name, w, cap in (("5-hour", snap.five_hour, p.five_hour_ceiling), ("7-day", snap.seven_day, p.weekly_target)):
             if w:
@@ -174,7 +174,7 @@ def cmd_status(cfg, a):
         _out({"farm": cfg.farm_id, "paused": ctl, "counts": counts, "workers": workers, "seats": _seats_json(rows)},
              True, "")
         return 0
-    print(f"claude-farm {__version__}  box {cfg.farm_id}  store {_store(cfg).describe()}"
+    print(f"clodfarm {__version__}  box {cfg.farm_id}  store {_store(cfg).describe()}"
           + (f"  PAUSED: {ctl.get('reason') or 'by hand'}" if ctl.get("paused") else ""))
     print(_budget_text(rows))
     rc = [e for e in store.events(now() - 7 * 86400, 500) if e["type"] == "rc.connected"]
@@ -186,7 +186,7 @@ def cmd_status(cfg, a):
         print(f"  {w['SK']:<40} {w.get('seat') or '':<16} {_ago(w.get('at')):>5}  {w.get('state', '')}"
               f"{'  ' + w['task'] if w.get('task') else ''}")
     if not workers:
-        print("  (none: is `claude-farm run` up?)")
+        print("  (none: is `clodfarm run` up?)")
     active = store.list_tasks("running") + store.list_tasks("waiting") + store.list_tasks("queued", 10)
     if active:
         print("TASKS")
@@ -284,10 +284,10 @@ def cmd_mission(cfg, a):
         text = open(a.file).read()
     if not text.strip():
         cur = next((p for p in cfg.mission_paths if os.path.isfile(p)), None)
-        print(open(cur).read().rstrip() if cur else "No mission yet. Set one: claude-farm mission \"Build ...\"")
+        print(open(cur).read().rstrip() if cur else "No mission yet. Set one: clodfarm mission \"Build ...\"")
         return 0 if cur else 1
     if not os.path.isdir(cfg.repo_dir):
-        print(f"The workspace repo {cfg.repo_dir} doesn't exist yet: start the farm first (claude-farm run).", file=sys.stderr)
+        print(f"The workspace repo {cfg.repo_dir} doesn't exist yet: start the farm first (clodfarm run).", file=sys.stderr)
         return 1
     path = gitops.write_mission(cfg.repo_dir, text)
     _store(cfg).event("mission.set", text.strip().splitlines()[0][:200])
@@ -322,15 +322,15 @@ def cmd_doctor(cfg, a):
         ok &= bool(good)
         print(f"  {'ok  ' if good else 'FAIL'}  {name}{': ' + detail if detail else ''}")
 
-    print("claude-farm doctor")
+    print("clodfarm doctor")
     exe = shutil.which(cfg.claude_bin)
     ver = subprocess.run([cfg.claude_bin, "--version"], capture_output=True, text=True).stdout.strip() if exe else ""
     check("claude binary", exe, ver or "not found")
     st = auth_status(cfg.claude_bin)
-    check("subscription login", st.get("loggedIn"), st.get("via") or st.get("error") or "run `claude-farm login`")
+    check("subscription login", st.get("loggedIn"), st.get("via") or st.get("error") or "run `clodfarm login`")
     try:
         store = _store(cfg)
-        check("farm store", store.ready(), store.describe() + ("" if store.ready() else " (start the farm or run `claude-farm init`)"))
+        check("farm store", store.ready(), store.describe() + ("" if store.ready() else " (start the farm or run `clodfarm init`)"))
     except Exception as e:  # noqa: BLE001
         check("farm store", False, f"{cfg.store}: {str(e)[:160]}")
     check("git", shutil.which("git"))
@@ -347,9 +347,9 @@ def cmd_run(cfg, a):
 
 
 def main(argv=None):
-    p = argparse.ArgumentParser(prog="claude-farm", description="Always-on Claude Code agents on your subscription.",
+    p = argparse.ArgumentParser(prog="clodfarm", description="Always-on Claude Code agents on your subscription.",
                                 formatter_class=argparse.RawDescriptionHelpFormatter, epilog=__doc__)
-    p.add_argument("--version", action="version", version=f"claude-farm {__version__}")
+    p.add_argument("--version", action="version", version=f"clodfarm {__version__}")
     sp = p.add_subparsers(dest="cmd", required=True)
 
     def add(name, fn, help_):
@@ -400,10 +400,10 @@ def main(argv=None):
     except Exception as e:  # noqa: BLE001 - one clear line for humans and agents, not a traceback
         code = getattr(e, "response", {}).get("Error", {}).get("Code", "")
         if code == "ResourceNotFoundException":
-            print(f"claude-farm: DynamoDB table '{cfg.table}' does not exist yet. Start the farm (`claude-farm run`) "
-                  "or run `claude-farm init`.", file=sys.stderr)
+            print(f"clodfarm: DynamoDB table '{cfg.table}' does not exist yet. Start the farm (`clodfarm run`) "
+                  "or run `clodfarm init`.", file=sys.stderr)
         elif "Could not connect" in str(e) or "Unable to locate credentials" in str(e):
-            print(f"claude-farm: cannot reach DynamoDB ({cfg.endpoint or cfg.region}): {e}", file=sys.stderr)
+            print(f"clodfarm: cannot reach DynamoDB ({cfg.endpoint or cfg.region}): {e}", file=sys.stderr)
         else:
             raise
         return 4

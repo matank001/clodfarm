@@ -1,6 +1,6 @@
 """The farm daemon: keeps Remote Control up and the workers busy.
 
-    claude-farm run
+    clodfarm run
 
 Threads:
   * remote-control keeper  ``claude remote-control`` so you can drive the box
@@ -364,8 +364,8 @@ class Farm:
         if cfg.stall_threshold and failures >= cfg.stall_threshold and not store.control().get("paused"):
             reason = f"circuit breaker: {failures} failed runs in a row (last: {tid} {task['title'][:60]})"
             store.set_paused(True, reason, by="farm")
-            self.notify("paused by circuit breaker", reason + ". Look at `claude-farm events` and `claude-farm task show "
-                        f"{tid}`, fix the cause, then run `claude-farm resume`.")
+            self.notify("paused by circuit breaker", reason + ". Look at `clodfarm events` and `clodfarm task show "
+                        f"{tid}`, fix the cause, then run `clodfarm resume`.")
         if final == "done" and branch:
             # a sub-task's branch stays until its parent has merged it
             gitops.remove_worktree(cfg.repo_dir, cwd, None if task.get("parent") else branch)

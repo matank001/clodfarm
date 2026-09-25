@@ -2,8 +2,8 @@ import threading
 
 import pytest
 
-from claude_farm.governor import Snapshot, Window
-from claude_farm.store import now
+from clodfarm.governor import Snapshot, Window
+from clodfarm.store import now
 
 
 def test_priority_then_age_order(store):
@@ -173,7 +173,7 @@ def test_resumed_task_waits_for_its_home_box(store):
 
 
 def test_items_written_before_versioning_are_adopted(store):
-    """Regression (cloud test 3): an item without `ver`, written by an older claude-farm, must still update."""
+    """Regression (cloud test 3): an item without `ver`, written by an older clodfarm, must still update."""
     store.b.put({"PK": "CONTROL", "SK": "HEALTH", "failures": 0})  # the old format: no version
     assert store.record_health(False) == 1
     assert store.record_health(False) == 2

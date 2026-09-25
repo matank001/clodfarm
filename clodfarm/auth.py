@@ -1,6 +1,6 @@
 """Claude subscription login: detect it, explain it, and prepare Claude Code for unattended use.
 
-claude-farm never reads, copies or prints credentials. It only asks Claude Code
+clodfarm never reads, copies or prints credentials. It only asks Claude Code
 (`claude auth status`) whether it is logged in, and tells you how to log in.
 """
 
@@ -15,8 +15,8 @@ import tempfile
 
 from .prompts import FARM_GUIDE
 
-GUIDE_START = "<!-- claude-farm:guide:start -->"
-GUIDE_END = "<!-- claude-farm:guide:end -->"
+GUIDE_START = "<!-- clodfarm:guide:start -->"
+GUIDE_END = "<!-- clodfarm:guide:end -->"
 
 
 def claude_home() -> str:
@@ -67,15 +67,15 @@ def seat_id(status: dict) -> str:
 
 
 def banner(cfg) -> str:
-    c = os.environ.get("FARM_CONTAINER_NAME", "claude-farm")
+    c = os.environ.get("FARM_CONTAINER_NAME", "clodfarm")
     return f"""
 +--------------------------------------------------------------------------+
-|  claude-farm: waiting for a Claude subscription login                      |
+|  clodfarm: waiting for a Claude subscription login                      |
 +--------------------------------------------------------------------------+
 Pick one (details: docs/auth.md):
 
   A) Log in from wherever you are (works on a remote server):
-       docker exec -it {c} claude-farm login
+       docker exec -it {c} clodfarm login
      It prints a URL. Open it on any device, approve, paste the code back.
      The login is saved in the claude-home volume and survives restarts.
 
@@ -141,7 +141,7 @@ def accept_remote_control():
 
 def _atomic_write(path: str, text: str):
     d = os.path.dirname(path) or "."
-    fd, tmp = tempfile.mkstemp(dir=d, prefix=".claude-farm-")
+    fd, tmp = tempfile.mkstemp(dir=d, prefix=".clodfarm-")
     with os.fdopen(fd, "w") as f:
         f.write(text)
     try:
