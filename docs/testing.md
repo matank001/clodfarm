@@ -45,4 +45,19 @@ The task: write `strutil.slugify` yourself, delegate `truncate` to exactly one s
   waited.
 - `claude-farm doctor` passed for the claude binary (2.1.274), DynamoDB through the instance role, git and the
   workspace. It failed only on the login, as expected before logging in.
-- Remote login and the queued sub-agent task: see the release notes once complete.
+- **Remote login:** `deploy/aws/deploy.sh login` opened an SSM session into `claude-farm login`. The owner opened the
+  URL, approved, and pasted the code. The farm noticed within seconds (`authenticated: claude.ai (team)`) and started.
+- **Test 1 found two bugs, both fixed:**
+  - Remote Control hung silently on its one-time "Enable Remote Control? (y/n)" prompt. claude-farm now pre-answers
+    it when `FARM_REMOTE_CONTROL=1`.
+  - The end-of-run auto-commit swept `__pycache__` into commits. The parent's later rebase then failed with
+    "untracked working tree files would be overwritten", and each resolve-conflict task hit it again. Build
+    artifacts are now excluded through `.git/info/exclude`, and conflict tasks are never chained.
+  - Both have regression tests.
+- **Test 2**, with `FARM_VERIFY_CMD="python3 -m unittest discover -p 'test_*.py'"`:
+  - Remote Control connected ("✔ Connected", session visible in the Claude app).
+  - The parent implemented slugify, spawned one sub-agent for truncate (29 s), and was resumed (14 s).
+  - The check passed, 2 commits merged onto main, no build artifacts were committed and no conflict tasks were
+    created.
+  - `claude-farm budget` read 14% of the 5-hour window and 21% of the 7-day window from the live
+    `rate_limit_event`. DynamoDB access worked through the instance role, with no keys on the box.
