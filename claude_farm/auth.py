@@ -108,6 +108,20 @@ def trust_directory(path: str):
     _atomic_write(p, json.dumps(cfg, indent=2))
 
 
+def accept_remote_control():
+    """Answer Claude Code's one-time "Enable Remote Control? (y/n)" prompt, which nobody can answer in a container.
+    Only called when FARM_REMOTE_CONTROL is on, i.e. when you asked for Remote Control."""
+    p = claude_json_path()
+    try:
+        cfg = json.load(open(p))
+    except (OSError, ValueError):
+        cfg = {}
+    if cfg.get("remoteDialogSeen"):
+        return
+    cfg["remoteDialogSeen"] = True
+    _atomic_write(p, json.dumps(cfg, indent=2))
+
+
 def _atomic_write(path: str, text: str):
     d = os.path.dirname(path) or "."
     fd, tmp = tempfile.mkstemp(dir=d, prefix=".claude-farm-")

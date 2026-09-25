@@ -18,6 +18,27 @@ import threading
 
 _lock = threading.Lock()  # one merge at a time per farm
 
+# Build artifacts and caches that must never be committed by the end-of-run auto-commit. Committed caches turn into
+# "untracked working tree files would be overwritten" the next time a test run regenerates them.
+DEFAULT_EXCLUDES = """__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.venv/
+venv/
+node_modules/
+.next/
+dist/
+build/
+*.egg-info/
+coverage/
+.coverage
+.DS_Store
+*.log
+"""
+_EXCLUDE_MARK = "# claude-farm defaults"
+
 
 class GitError(RuntimeError):
     pass
@@ -42,9 +63,22 @@ def has_origin(repo: str) -> bool:
     return "origin" in git(repo, "remote", check=False).split()
 
 
+def ensure_excludes(repo: str):
+    """Add the default excludes to the repo's own .git/info/exclude (shared by all worktrees; never committed,
+    never touches your global git config)."""
+    common = git(repo, "rev-parse", "--git-common-dir", check=False) or ".git"
+    path = os.path.join(repo, common, "info", "exclude") if not os.path.isabs(common) else os.path.join(common, "info", "exclude")
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    cur = open(path).read() if os.path.exists(path) else ""
+    if _EXCLUDE_MARK not in cur:
+        with open(path, "a") as f:
+            f.write(("\n" if cur and not cur.endswith("\n") else "") + _EXCLUDE_MARK + "\n" + DEFAULT_EXCLUDES)
+
+
 def ensure_repo(repo: str, url: str | None):
     """Clone ``url`` into ``repo`` on first start, or create an empty repo."""
     if is_repo(repo):
+        ensure_excludes(repo)
         return
     os.makedirs(os.path.dirname(repo), exist_ok=True)
     if url:
@@ -57,6 +91,7 @@ def ensure_repo(repo: str, url: str | None):
         git(repo, "add", "-A")
         git(repo, "-c", "user.name=claude-farm", "-c", "user.email=claude-farm@localhost",
             "commit", "-qm", "init workspace")
+    ensure_excludes(repo)
 
 
 def worktree_for(repo: str, task_id: str, base: str | None = None) -> tuple[str, str]:

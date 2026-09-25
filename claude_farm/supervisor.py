@@ -20,7 +20,7 @@ import threading
 import time
 
 from . import gitops, notify, prompts
-from .auth import auth_status, banner, install_guide, trust_directory
+from .auth import accept_remote_control, auth_status, banner, install_guide, trust_directory
 from .config import Config, load
 from .governor import Snapshot, decide
 from .runner import build_cmd, run_agent
@@ -44,6 +44,8 @@ class Farm:
         self.ensure_table()
         gitops.ensure_repo(self.cfg.repo_dir, self.cfg.repo_url)
         if self.cfg.manage_claude_config:
+            if self.cfg.remote_control:
+                accept_remote_control()
             install_guide()
             trust_directory(self.cfg.repo_dir)
             trust_directory(self.cfg.workspace)
@@ -367,11 +369,15 @@ class Farm:
             gitops.prune_merged(cfg.repo_dir)
             return out + ("; check passed" if cfg.verify_cmd else ""), "landed"
         except gitops.GitError as e:
+            if task.get("kind") == "conflict":
+                # never chain conflict tasks: a second failure needs a human
+                self.notify("merge conflict needs you", f"{tid} ({task['title'][:80]}) could not land either: {str(e)[:500]}")
+                return str(e), "conflict"
             store.add_task(f"Resolve merge conflict from task {tid}",
                            f"Task {tid} ({task['title']}) finished, but its branch {branch} conflicts with "
                            f"main. In your worktree run `git merge {branch}`, resolve the conflicts so both "
                            f"sides' intent is kept, run the tests, and commit.", priority=8,
-                           created_by=tid, max_depth=99)
+                           kind="conflict", created_by=tid, max_depth=99)
             self.notify("merge conflict", f"{tid} ({task['title'][:80]}) conflicts with main; a resolve task was queued.")
             return str(e), "conflict"
 

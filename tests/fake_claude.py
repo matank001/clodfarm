@@ -7,6 +7,7 @@ Behaviour is driven by words in the prompt, so tests can script agents:
   COMMIT <name> write <name>.txt in the working directory and git-commit it
   REJECT        report a rejected rate limit and fail
   SLOW <s>      sleep s seconds before answering
+  CACHE         leave an uncommitted __pycache__/cache.cpython-311.pyc behind, like a test run does
   FAIL          end with an error result whose text mentions a rate limit (it is not one)
   (resumed to fix a failing check: writes fixed.txt and commits it)
 Utilization reported in each rate_limit_event comes from FAKE_UTIL_5H / FAKE_UTIL_7D.
@@ -97,6 +98,10 @@ def main(argv):
         subprocess.run(["git", "add", f"{name}.txt"], check=True)
         subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", f"add {name}"], check=True)
         text = f"committed {name}"
+    if "CACHE" in prompt:
+        os.makedirs("__pycache__", exist_ok=True)
+        with open("__pycache__/cache.cpython-311.pyc", "wb") as f:
+            f.write(os.urandom(16))
     if resumed:
         for br in sorted(set(re.findall(r"branch (farm/\w+)", prompt))):
             subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "merge", "-q", "--no-edit", br], check=True)

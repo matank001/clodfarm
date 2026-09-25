@@ -225,3 +225,26 @@ def test_circuit_breaker_pauses_and_notifies(env, monkeypatch):
     finally:
         stop_farm(farm, t)
         srv.shutdown()
+
+
+def test_build_artifacts_are_never_committed(env):
+    """Regression (cloud test 2026-09-25): an auto-committed __pycache__ broke the parent's rebase onto main."""
+    farm, t = start_farm()
+    try:
+        tid = json.loads(cli("task", "add", "py", "--prompt", "SPAWN 1 CACHE", "--json").stdout)["id"]
+        wait_for(lambda: farm.store.get_task(tid)["status"] in ("done", "failed"), timeout=60)
+        assert farm.store.get_task(tid)["status"] == "done", farm.store.get_task(tid)["result"][-500:]
+        files = repo_files(env)
+        assert "child0.txt" in files and not any("__pycache__" in f for f in files)
+        assert not [x for x in farm.store.list_tasks("queued") if x.get("kind") == "conflict"]
+    finally:
+        stop_farm(farm, t)
+
+
+def test_remote_control_prompt_is_pre_answered(env):
+    farm, t = start_farm()
+    try:
+        wait_for(lambda: [c for c in calls(env) if c["cmd"] == "remote-control"])
+        assert json.load(open(env / "claude-home" / ".claude.json"))["remoteDialogSeen"] is True
+    finally:
+        stop_farm(farm, t)
