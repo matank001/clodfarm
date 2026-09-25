@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -25,6 +26,9 @@ from .config import Config, load
 from .governor import Snapshot, decide
 from .runner import build_cmd, run_agent
 from .store import Store, iso, now
+
+
+ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\]8;;[^\x07\x1b]*(?:\x07|\x1b\\)?")
 
 
 class Farm:
@@ -128,10 +132,18 @@ class Farm:
                 return
             self.procs["remote-control"] = p
             self.store.event("rc.started", f"Remote Control session '{self.cfg.name}' starting (pid {p.pid})")
-            for line in p.stdout:
-                line = line.rstrip()
-                if line:
-                    print(f"[remote-control] {line}", flush=True)
+            seen, connected = set(), False
+            for raw in p.stdout:
+                # its screen redraws: drop terminal escapes and print each distinct line once
+                line = ANSI.sub("", raw).replace("\x07", "").strip()
+                if not line or line in seen:
+                    continue
+                seen.add(line)
+                print(f"[remote-control] {line}", flush=True)
+                url = re.search(r"https://claude\.ai/code/session_\w+", raw)
+                if url and not connected:
+                    connected = True
+                    self.store.event("rc.connected", f"Remote Control '{self.cfg.name}' is live: {url.group(0)}")
             p.wait()
             self.procs.pop("remote-control", None)
             if self.stop.is_set():

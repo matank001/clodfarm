@@ -151,6 +151,9 @@ def cmd_status(cfg, a):
     print(f"claude-farm {__version__}  farm {cfg.farm_id}  table {cfg.table}"
           + (f"  PAUSED: {ctl.get('reason') or 'by hand'}" if ctl.get("paused") else ""))
     print(_budget_text(cfg, snap, d, store.slots()))
+    rc = [e for e in store.events(now() - 7 * 86400, 500) if e["type"] == "rc.connected"]
+    if rc:
+        print(f"REMOTE    {rc[-1]['msg']}")
     print("QUEUE     " + "  ".join(f"{k} {v}" for k, v in counts.items()))
     print("WORKERS")
     for w in sorted(workers, key=lambda w: w["SK"]):
