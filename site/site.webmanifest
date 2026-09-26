@@ -4,8 +4,8 @@
  "description": "A farm of Claude Code agents that paces itself on your real usage limits.",
  "start_url": "/",
  "display": "standalone",
- "background_color": "#070B1C",
- "theme_color": "#070B1C",
+ "background_color": "#4F6B25",
+ "theme_color": "#4F6B25",
  "icons": [
   {
    "src": "/favicon.svg",

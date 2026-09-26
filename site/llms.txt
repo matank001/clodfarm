@@ -10,6 +10,7 @@
 - Big tasks fan out into sub-agents; the parent task is resumed in its own session and merges their branches.
 - An optional check (e.g. the project's tests) runs before work lands; a failing check sends the agent back to fix it.
 - A budget governor reads the account's real 5-hour and weekly usage from Claude Code's rate-limit events. Defaults: agents stop at 80% of the week and 85% of a 5-hour window, wait out rejections, and never use paid overage unless allowed. With an API key it keeps to a daily dollar cap.
+- A pixel-art web UI (localhost:8080, password login) shows every agent as a Claude character: working at a terminal, helping as a sub-agent, or napping when the budget paces it. You post quests and add Claude logins from it.
 - Remote Control keeps the farm reachable from the Claude app and claude.ai/code.
 - One box stores its state in SQLite. Several boxes and several Claude accounts can share one farm through DynamoDB, with a separate budget per account.
 

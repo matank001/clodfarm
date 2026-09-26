@@ -4,7 +4,7 @@ document.addEventListener("click", (e) => {
   if (!b || !navigator.clipboard) return;
   navigator.clipboard.writeText(document.querySelector(b.dataset.copy).textContent.trim()).then(() => {
     b.classList.add("done");
-    b.querySelector(".copy-label").textContent = "Copied";
-    setTimeout(() => { b.classList.remove("done"); b.querySelector(".copy-label").textContent = "Copy"; }, 1800);
+    b.querySelector(".copy-label").textContent = "COPIED";
+    setTimeout(() => { b.classList.remove("done"); b.querySelector(".copy-label").textContent = "COPY"; }, 1800);
   });
 });

@@ -4,10 +4,10 @@
 
 - **The farm UI** (`http://localhost:8080`, served by the daemon; `FARM_UI=0` turns it off). A pixel-art farm: every
   worker is a Claude critter that wanders, tends its task's crop at a terminal, or naps when the governor paces it.
-  Finished tasks bloom into Claude sparks, the quest board shows the queue. Handheld-RPG menus: the party (every
-  Claude account with 5-hour and 7-day "stamina" bars), the quest log (active / queued / done / failed, cancel and
-  retry), new quests, the mission, the journal, pause and resume.
-- **Hatch agents from the browser.** Each agent you add is its own Claude Code login (the UI runs `claude auth login`
+  Finished tasks bloom into Claude sparks, sub-agents are mini Claudes around their parent's plot, the quest board
+  shows the queue. Click a Claude for its budget and stats; post a quest as plain text.
+- **clod.farm** runs the same farm (a scripted demo) behind the install card.
+- **Add Claudes from the browser.** Each agent you add is its own Claude Code login (the UI runs `claude auth login`
   and shows its URL; you paste the code back) and its own `clodfarm run` process on the same queue, paced on that
   account's budget. The farm's first login can be done the same way.
 - One password, no username: `FARM_UI_PASSWORD`, `clodfarm ui-passwd`, or a generated one printed once in the log.

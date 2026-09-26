@@ -16,17 +16,19 @@ elsewhere, put a TLS reverse proxy in front (it should send `X-Forwarded-Proto: 
 | `!` | The worker reported an error, or the agent's process isn't running. |
 | An egg with `?` | An agent that isn't logged in yet. Click it to log it in. |
 | Crops | Running tasks grow; done tasks bloom into Claude's spark; failed ones wilt. |
-| The quest board | The queue: one note per queued task. Click it for the quest log. |
+| The quest board | The queue: one note per queued task. |
+| A mini Claude | A sub-agent: a sub-task of the quest on that plot. It types when it's working and shows `…` while it waits for a free Claude. |
 
 At night (your local time) the farm gets dark and the terminals glow.
 
-Menus: **Party** (every Claude account, with its 5-hour and 7-day usage as stamina bars), **Quests** (the task list;
-cancel, retry, read the prompt, result and runs), **New quest**, **Goal** (MISSION.md), **Journal** (the event log),
-pause and resume. Keys: `N` new quest, `Q` quests, `P` party, `H` hatch, `M` mission, `J` journal.
+Click a Claude for its status, what it's working on, its sub-agents, its quests of the last 7 days and its budget
+left (5-hour and 7-day). Click a plot for its quest. **+ NEW CLAUDE** adds a Claude login, **NEW QUEST** posts a
+quest (just text: its first line becomes its name), and **GOAL** sets MISSION.md. Keys: `N` new quest, `C` new
+Claude, `M` mission.
 
 ## Agents ("hatching")
 
-The container's own login is the primary agent. **Hatch** adds another one:
+The container's own login is the primary agent. **+ NEW CLAUDE** (or an egg on the farm) adds another one:
 
 1. The UI creates a Claude config dir for it (`~/.claude/clodfarm-agents/<name>`, inside the claude-home volume, so
    the login survives a new container) and starts `claude auth login` for it in a pseudo-terminal.

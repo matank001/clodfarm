@@ -4,13 +4,13 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>clodfarm: a farm of Claude Code agents</title>
-<meta name="description" content="clodfarm runs a farm of Claude Code agents in one container. They split work into sub-agents, test it before it lands, and pace themselves on your account's real usage limits. Open source, MIT.">
+<meta name="description" content="clodfarm runs a farm of Claude Code agents in one container. They split work into sub-agents, test it before it lands, pace themselves on your real usage limits, and you watch them work in a pixel farm. Open source, MIT.">
 <link rel="canonical" href="https://clod.farm/">
 <meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
-<meta name="theme-color" content="#070B1C">
+<meta name="theme-color" content="#4f6b25">
 <link rel="apple-touch-icon" href="/apple-touch-icon.png">
 <link rel="manifest" href="/site.webmanifest">
-<meta name="color-scheme" content="dark">
+<meta name="color-scheme" content="light">
 <link rel="icon" href="/favicon.svg" type="image/svg+xml">
 
 <meta property="og:type" content="website">
@@ -22,17 +22,15 @@
 <meta property="og:image" content="https://clod.farm/og.png">
 <meta property="og:image:width" content="1280">
 <meta property="og:image:height" content="640">
-<meta property="og:image:alt" content="A night-time farm where glowing terminal sprouts are Claude Code agents, with a moon-shaped usage gauge">
+<meta property="og:image:alt" content="A pixel-art farm where little Claude characters work at terminals next to crop plots">
 <meta name="twitter:card" content="summary_large_image">
 <meta name="twitter:title" content="clodfarm: a farm of Claude Code agents">
 <meta name="twitter:description" content="Plant a mission tonight, harvest the work in the morning.">
 <meta name="twitter:image" content="https://clod.farm/og.png">
 
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500&display=swap">
-<link rel="preload" href="/scene.svg?v=202609251823" as="image" type="image/svg+xml">
-<link rel="stylesheet" href="/style.css?v=202609251823">
+<link rel="preload" href="/fonts/PressStart2P.ttf" as="font" type="font/ttf" crossorigin>
+<link rel="stylesheet" href="/style.css?v=202609260140">
+<script src="/farm.js?v=202609260140" defer></script>
 <script src="/copy.js" defer></script>
 
 <script type="application/ld+json">
@@ -102,45 +100,40 @@
 {"@context": "https://schema.org", "@type": "WebSite", "name": "clodfarm", "alternateName": "clod.farm", "url": "https://clod.farm/", "inLanguage": "en"}
 </script>
 </head>
-<body>
+<body data-page="landing">
 <a class="skip" href="#main">Skip to content</a>
+<canvas id="world" aria-hidden="true"></canvas>
+<div id="labels" aria-hidden="true"></div>
 
-<div class="stage">
-<header class="bar">
-  <a class="mark" href="/" aria-label="clodfarm home"><img src="/logo.svg" width="30" height="30" alt=""><span>clodfarm</span></a>
-  <nav aria-label="Main">
-    <a href="https://github.com/matank001/clodfarm/tree/main/docs">Docs</a>
-    <a class="gh" href="https://github.com/matank001/clodfarm">GitHub</a>
-  </nav>
-</header>
+<div class="goal" aria-hidden="true"><span class="goal-label">GOAL</span><span class="goal-text">HARVEST THE WORK</span></div>
 
-<main id="main">
-  <section class="hero">
-    <div class="copy">
-      <h1>A farm of Claude Code agents.</h1>
-      <p class="lede">Plant a mission tonight, harvest the work in the morning. Agents split it into sub-agents, test it
-        before it lands, and pace themselves on your real usage limits.</p>
+<main id="main" class="stage">
+  <div class="hero">
+    <header class="title">
+      <h1 id="h1" class="logo"><span>CLOD</span><span>FARM</span></h1>
+      <p class="tagline">a farm of Claude Code agents</p>
+    </header>
+    <section class="card panel" aria-labelledby="h1">
+    <p class="explain">Claude Code agents that work around the clock in one container. They split big quests into
+      sub-agents, test before anything lands, and nap when your usage limits say so. Watch them in a pixel farm.</p>
 
-      <div class="install">
-        <label class="sr-only" for="cmd">Install command</label>
-        <span class="prompt" aria-hidden="true">$</span><code id="cmd">curl -fsSL https://raw.githubusercontent.com/matank001/clodfarm/main/scripts/install.sh | sh</code>
-        <button class="copy-btn" type="button" data-copy="#cmd" aria-label="Copy install command"><svg class="i-copy" aria-hidden="true" viewBox="0 0 24 24" width="16" height="16"><rect x="9" y="9" width="11" height="11" rx="2.5" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M5 15V6.5A1.5 1.5 0 0 1 6.5 5H15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/></svg><svg class="i-done" aria-hidden="true" viewBox="0 0 24 24" width="16" height="16"><path d="m5 12.5 4.5 4.5L19 7.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg><span class="copy-label">Copy</span></button>
-      </div>
-
-      <div class="actions">
-        <a class="btn btn-primary" href="https://github.com/matank001/clodfarm"><svg aria-hidden="true" viewBox="0 0 16 16" width="17" height="17"><path fill="currentColor" d="M8 0a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38v-1.33c-2.23.48-2.7-1.07-2.7-1.07-.36-.92-.89-1.17-.89-1.17-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.72 1.23 1.88.87 2.34.67.07-.52.28-.87.5-1.07-1.78-.2-3.65-.89-3.65-3.96 0-.87.31-1.59.83-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.03 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.08-1.87 3.76-3.66 3.96.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8 8 0 0 0 8 0Z"/></svg><span>View on GitHub</span></a>
-        <a class="btn btn-quiet" href="https://github.com/matank001/clodfarm/tree/main/docs">Read the docs</a>
-      </div>
-      <p class="note">Open source under MIT. Runs anywhere Docker does.</p>
+    <div class="install">
+      <span class="prompt" aria-hidden="true">$</span>
+      <code id="cmd">curl -fsSL https://raw.githubusercontent.com/matank001/clodfarm/main/scripts/install.sh | sh</code>
+      <button class="copy-btn" type="button" data-copy="#cmd" aria-label="Copy install command"><span class="copy-label">COPY</span></button>
     </div>
 
-  </section>
-
+    <div class="actions">
+      <a class="btn primary" href="https://github.com/matank001/clodfarm/tree/main/docs">▶ DOCS</a>
+      <a class="btn" href="https://github.com/matank001/clodfarm"><svg aria-hidden="true" viewBox="0 0 16 16" width="16" height="16"><path fill="currentColor" d="M8 0a8 8 0 0 0-2.53 15.59c.4.07.55-.17.55-.38v-1.33c-2.23.48-2.7-1.07-2.7-1.07-.36-.92-.89-1.17-.89-1.17-.73-.5.05-.49.05-.49.8.06 1.23.83 1.23.83.72 1.23 1.88.87 2.34.67.07-.52.28-.87.5-1.07-1.78-.2-3.65-.89-3.65-3.96 0-.87.31-1.59.83-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82a7.6 7.6 0 0 1 4 0c1.53-1.03 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.28.82 2.15 0 3.08-1.87 3.76-3.66 3.96.29.25.54.73.54 1.48v2.2c0 .21.15.46.55.38A8 8 0 0 0 8 0Z"/></svg> GITHUB</a>
+    </div>
+    <p class="note">Open source, MIT. Runs anywhere Docker does.</p>
+    </section>
+  </div>
 </main>
-</div>
 
-<section class="faq" aria-labelledby="faq-h">
-  <h2 id="faq-h">Questions</h2>
+<section class="faq panel" aria-labelledby="faq-h">
+  <h2 id="faq-h">QUESTIONS</h2>
     <details>
       <summary>What is clodfarm?</summary>
       <p>An open-source program (MIT) that runs Claude Code agents around the clock in one Docker container. You give it a mission or tasks; agents take work from a queue, split big jobs into sub-agents, test the result, and land passing work in your git repo.</p>
