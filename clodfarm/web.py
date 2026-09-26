@@ -137,7 +137,8 @@ class Auth:
 # ---------------------------------------------------------------------- state
 def _public_task(t: dict, full: bool = False) -> dict:
     keep = ["id", "title", "status", "priority", "kind", "parent", "children", "depth", "created", "updated",
-            "started", "finished", "attempts", "max_attempts", "worker", "branch", "created_by", "children_open"]
+            "started", "finished", "attempts", "max_attempts", "worker", "branch", "created_by", "children_open", "owner",
+            "to"]
     out = {k: t.get(k) for k in keep if t.get(k) is not None}
     if full:
         out.update(prompt=t.get("prompt", ""), result=t.get("result", ""))
@@ -164,87 +165,84 @@ class FarmUI:
             return s
 
     def _build_state(self) -> dict:
-        from .cli import _seats  # budget per seat, the same numbers `clodfarm status` shows
-        store, host = self.store, None
+        from .cli import _seats  # budget per seat, the same numbers `clodfarm agents` shows
+        store = self.store
         workers = store.workers()
-        running = store.list_tasks("running", 50)
-        titles = {t["id"]: t["title"] for t in running}
         seats = {r["seat"]: r for r in _seats(self.cfg, store)}
-        took, ended = {}, {}
-        for e in store.events(now() - 7 * 86400, 5000):
-            if e["type"] == "task.claimed" and " by " in e["msg"]:
-                took[e.get("task")] = e["msg"].split(" by ", 1)[1]
-            elif e["type"] in ("task.done", "task.failed"):
-                ended[e.get("task")] = e["type"][5:]
-        self._stats = {}
-        for tid, worker in took.items():
-            aid = worker.split("/")[0].split("@")[0]
-            st = self._stats.setdefault(aid, {"took": 0, "done": 0, "failed": 0})
-            st["took"] += 1
+        events = store.events(now() - 7 * 86400, 5000)
+        stats: dict[str, dict] = {}  # per Claude, the last 7 days: sub-agents it ran, finished, failed
+        took = {e.get("task"): e["msg"].split(" by ", 1)[1].split("@")[0] for e in events
+                if e["type"] == "task.claimed" and " by " in e["msg"]}
+        ended = {e.get("task"): e["type"][5:] for e in events if e["type"] in ("task.done", "task.failed")}
+        for tid, name in took.items():
+            st = stats.setdefault(name, {"ran": 0, "done": 0, "failed": 0})
+            st["ran"] += 1
             if tid in ended:
                 st[ended[tid]] += 1
-        agents, known = [], set()
-        for a in self.manager.all():
-            st = self.manager.auth(a)
-            mine = [w for w in workers if w["SK"].split("/")[0].split("@")[0] == a["id"]]
-            known |= {w["SK"] for w in mine}
-            seat = next((w.get("seat") for w in mine if w.get("seat")), None)
-            agents.append(self._agent_view(a, st, mine, seat, seats, titles))
-        # boxes elsewhere in a multi-box farm: visitors you can watch but not manage here. A box on this host
-        # that isn't registered is an agent that was released: its last heartbeats are not a visitor.
-        others: dict[str, list] = {}
-        here, ids = "@" + socket.gethostname(), {a["id"] for a in self.manager.all()}
-        for w in workers:
-            box = w["SK"].split("/")[0]
-            if w["SK"] in known or (box.endswith(here) and box[: -len(here)] not in ids):
-                continue
-            others.setdefault(box, []).append(w)
-        for farm_id, ws in sorted(others.items()):
-            seat = next((w.get("seat") for w in ws if w.get("seat")), None)
-            a = {"id": farm_id, "name": farm_id.split("@")[0], "primary": False, "remote": True, "hat": "cap"}
-            agents.append(self._agent_view(a, {"loggedIn": True}, ws, seat, seats, titles))
-        ctl = store.control()
         rc = {}  # each Claude's newest Remote Control link: talk to it from the Claude app
-        for e in store.events(now() - 7 * 86400, 5000):
+        for e in events:
             m = re.match(r"Remote Control '([^']+)' is live: (https://\S+)", e["msg"]) if e["type"] == "rc.connected" else None
             if m:
                 rc[m.group(1)] = m.group(2)
-        for a in agents:
-            a["remote_control"] = rc.get(a["id"]) or rc.get(a["name"])
+        by_name: dict[str, list] = {}
+        for w in workers:
+            by_name.setdefault(w["SK"].split("/")[0].split("@")[0], []).append(w)
+        claudes = [(a, False) for a in self.manager.all()]
+        # Claudes on other boxes of a multi-box farm: you can watch them but not manage them here. A box on this host
+        # that isn't registered is a Claude that was released: its last heartbeats are not a visitor.
+        here, ids = "@" + socket.gethostname(), {a["id"] for a in self.manager.all()}
+        for box in sorted({w["SK"].split("/")[0] for w in workers}):
+            name = box.split("@")[0]
+            if name not in ids and not box.endswith(here) and all(c[0]["id"] != name for c in claudes):
+                claudes.append(({"id": name, "name": name, "remote": True, "hat": "cap"}, True))
+        agents = []
+        for a, remote in claudes:
+            ws = by_name.get(a["id"], [])
+            seat = next((w.get("seat") for w in ws if w.get("seat")), None)
+            agents.append(self._agent_view(a, {"loggedIn": True} if remote else self.manager.auth(a), ws, seat,
+                                           seats, stats, rc.get(a["id"]) or rc.get(a.get("name"))))
+        primary = self.cfg.name
+        subs = []
+        for s in ("running", "waiting", "queued"):
+            for t in store.list_tasks(s, 60):
+                v = _public_task(t)
+                v["owner"] = t.get("owner") or (t.get("worker", "").split("@")[0] or primary)
+                v["on"] = t.get("worker", "").split("@")[0] if s == "running" else t.get("to")
+                subs.append(v)
+        recent = [_public_task(t) | {"owner": t.get("owner") or primary}
+                  for t in store.list_tasks("done", 12) + store.list_tasks("failed", 4)
+                  if not t.get("parent") and now() - float(t.get("finished") or t.get("updated") or 0) < 6 * 3600]
+        ctl = store.control()
         return {
             "farm": self.cfg.name, "version": __version__, "now": now(),
             "paused": bool(ctl.get("paused")), "pause_reason": ctl.get("reason") or "",
-            "counts": {s: store.count(s) for s in ("queued", "running", "waiting", "done", "failed")},
-            "agents": agents,
-            "tasks": {"running": [_public_task(t) for t in running],
-                      "waiting": [_public_task(t) for t in store.list_tasks("waiting", 30)],
-                      "queued": [_public_task(t) for t in store.list_tasks("queued", 40)],
-                      "done": [_public_task(t) for t in store.list_tasks("done", 12)],
-                      "failed": [_public_task(t) for t in store.list_tasks("failed", 4)]},
-            "events": [{"at": e["at"], "type": e["type"], "msg": e["msg"][:240], "task": e.get("task")}
-                       for e in store.events(now() - 3 * 86400, 40)],
+            "agents": agents, "subagents": subs, "recent": recent,
+            "events": [{"at": e["at"], "type": e["type"], "msg": e["msg"][:240], "task": e.get("task"), "by": e.get("by")}
+                       for e in events[-40:]],
         }
 
-    def _agent_view(self, a, st, mine, seat, seats, titles) -> dict:
+    def _agent_view(self, a, st, ws, seat, seats, stats, link) -> dict:
         r = seats.get(seat) if seat else None
         snap, d = (r or {}).get("snapshot"), (r or {}).get("decision")
         login = self.manager.login(a["id"]) if not a.get("remote") else None
+        states = [w.get("state", "") for w in ws]
+        running = sum(s == "running" for s in states)
+        resting = bool(states) and all(s.startswith("throttled") for s in states)
         return {
             "id": a["id"], "name": a.get("name") or a["id"], "primary": bool(a.get("primary")),
             "remote": bool(a.get("remote")), "hat": a.get("hat", "straw"), "created": a.get("created", 0),
             "loggedIn": bool(st.get("loggedIn")), "email": st.get("email"), "plan": st.get("subscriptionType"),
-            "via": st.get("via"), "alive": a.get("remote") or self.manager.alive(a["id"]), "seat": seat,
-            "login": login.view() if login else None,
-            "stats": self._stats.get(a["id"].split("@")[0], {"took": 0, "done": 0, "failed": 0}),
-            "workers": [{"id": w["SK"], "name": w["SK"].rsplit("/", 1)[-1], "state": w.get("state", ""),
-                         "task": w.get("task"), "task_title": titles.get(w.get("task")), "at": w.get("at")}
-                        for w in sorted(mine, key=lambda w: w["SK"])],
+            "alive": bool(a.get("remote") or self.manager.alive(a["id"])), "up": bool(ws), "seat": seat,
+            "login": login.view() if login else None, "remote_control": link,
+            "running": running, "resting": resting,
+            "error": next((s for s in states if s.startswith("error")), None),
+            "stats": stats.get(a["id"], {"ran": 0, "done": 0, "failed": 0}),
             "budget": None if not r else {
                 "five_hour": snap.five_hour.utilization if snap and snap.five_hour else None,
                 "five_hour_resets": snap.five_hour.resets_at if snap and snap.five_hour else None,
                 "seven_day": snap.seven_day.utilization if snap and snap.seven_day else None,
                 "seven_day_resets": snap.seven_day.resets_at if snap and snap.seven_day else None,
-                "allowed": d.workers if d else None, "max": self.cfg.policy.max_workers,
+                "can_start": max(0, (d.workers if d else 0) - running), "max": self.cfg.policy.max_workers,
                 "reason": d.reason if d else "", "measured": snap.observed_at if snap else None},
         }
 

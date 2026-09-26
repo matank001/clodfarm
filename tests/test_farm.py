@@ -56,7 +56,7 @@ def repo_files(env):
 def test_parent_spawns_sub_agents_and_everything_merges(env):
     farm, t = start_farm()
     try:
-        tid = json.loads(cli("task", "add", "big job", "--prompt", "SPAWN 2", "--json").stdout)["id"]
+        tid = json.loads(cli("spawn", "big job", "--prompt", "SPAWN 2", "--json").stdout)["id"]
         wait_for(lambda: farm.store.get_task(tid)["status"] == "done", timeout=60)
         task = farm.store.get_task(tid)
         assert task["result"].startswith("integrated")
@@ -88,12 +88,12 @@ def test_remote_control_is_kept_running(env):
 def test_rate_limit_pauses_the_whole_farm_and_gives_the_attempt_back(env):
     farm, t = start_farm()
     try:
-        tid = json.loads(cli("task", "add", "hit the wall", "--prompt", "REJECT", "--json").stdout)["id"]
+        tid = json.loads(cli("spawn", "hit the wall", "--prompt", "REJECT", "--json").stdout)["id"]
         wait_for(lambda: (farm.store.get_snapshot() or 0) and farm.store.get_snapshot().status == "rejected")
         wait_for(lambda: farm.store.get_task(tid)["status"] == "queued")
         assert decide(farm.store.get_snapshot(), farm.cfg.policy, time.time()).workers == 0
         assert int(farm.store.get_task(tid)["attempts"]) == 0
-        other = json.loads(cli("task", "add", "must wait", "--prompt", "COMMIT waited", "--json").stdout)["id"]
+        other = json.loads(cli("spawn", "must wait", "--prompt", "COMMIT waited", "--json").stdout)["id"]
         time.sleep(4)
         assert farm.store.get_task(other)["status"] == "queued", "nothing starts while rate limited"
     finally:
@@ -104,30 +104,12 @@ def test_governor_throttles_when_the_five_hour_window_is_nearly_used(env, monkey
     monkeypatch.setenv("FAKE_UTIL_5H", "0.95")
     farm, t = start_farm()
     try:
-        first = json.loads(cli("task", "add", "first", "--prompt", "COMMIT first", "--json").stdout)["id"]
+        first = json.loads(cli("spawn", "first", "--prompt", "COMMIT first", "--json").stdout)["id"]
         wait_for(lambda: farm.store.get_task(first)["status"] == "done")
-        second = json.loads(cli("task", "add", "second", "--prompt", "COMMIT second", "--json").stdout)["id"]
+        second = json.loads(cli("spawn", "second", "--prompt", "COMMIT second", "--json").stdout)["id"]
         time.sleep(4)
         assert farm.store.get_task(second)["status"] == "queued"
         assert "5-hour window" in json.loads(cli("budget", "--json").stdout)["seats"][0]["decision"]["reason"]
-    finally:
-        stop_farm(farm, t)
-
-
-def test_planner_keeps_agents_busy_from_the_mission(env, monkeypatch):
-    monkeypatch.setenv("FARM_PLANNER", "1")
-    monkeypatch.setenv("FAKE_PLAN", "PLAN 2")
-    repo = env / "workspace" / "repo"
-    repo.mkdir(parents=True)
-    subprocess.run(["git", "init", "-q", "-b", "main", str(repo)], check=True)
-    (repo / "MISSION.md").write_text("Write two files.\n")
-    subprocess.run(["git", "-C", str(repo), "add", "-A"], check=True)
-    subprocess.run(["git", "-C", str(repo), "commit", "-qm", "mission"], check=True)
-    farm, t = start_farm()
-    try:
-        wait_for(lambda: {"planned0.txt", "planned1.txt"} <= repo_files(env), timeout=60)
-        plans = wait_for(lambda: [x for x in farm.store.list_tasks("done") if x["kind"] == "plan"])
-        assert int(plans[0].get("spawned", 0)) == 2
     finally:
         stop_farm(farm, t)
 
@@ -136,7 +118,7 @@ def test_pause_stops_new_work(env):
     farm, t = start_farm()
     try:
         cli("pause", "testing")
-        tid = json.loads(cli("task", "add", "later", "--prompt", "COMMIT later", "--json").stdout)["id"]
+        tid = json.loads(cli("spawn", "later", "--prompt", "COMMIT later", "--json").stdout)["id"]
         time.sleep(3)
         assert farm.store.get_task(tid)["status"] == "queued"
         cli("resume")
@@ -148,11 +130,11 @@ def test_pause_stops_new_work(env):
 def test_agents_get_the_farm_guide(env):
     farm, t = start_farm()
     try:
-        tid = json.loads(cli("task", "add", "x", "--prompt", "COMMIT guide", "--json").stdout)["id"]
+        tid = json.loads(cli("spawn", "x", "--prompt", "COMMIT guide", "--json").stdout)["id"]
         wait_for(lambda: farm.store.get_task(tid)["status"] == "done")
         run = [c for c in calls(env) if c.get("task") == tid][0]
         sysprompt = run["argv"][run["argv"].index("--append-system-prompt") + 1]
-        assert "clodfarm task add" in sysprompt and tid in sysprompt
+        assert "clodfarm spawn" in sysprompt and "clodfarm agents" in sysprompt and tid in sysprompt
         assert "clodfarm:guide:start" in open(env / "claude-home" / "CLAUDE.md").read()
     finally:
         stop_farm(farm, t)
@@ -162,7 +144,7 @@ def test_verify_gate_resumes_the_agent_to_fix_a_failing_check(env, monkeypatch):
     monkeypatch.setenv("FARM_VERIFY_CMD", "test -f fixed.txt")
     farm, t = start_farm()
     try:
-        tid = json.loads(cli("task", "add", "gated", "--prompt", "COMMIT feature", "--json").stdout)["id"]
+        tid = json.loads(cli("spawn", "gated", "--prompt", "COMMIT feature", "--json").stdout)["id"]
         wait_for(lambda: farm.store.get_task(tid)["status"] == "done", timeout=60)
         assert {"feature.txt", "fixed.txt"} <= repo_files(env), "lands only after the check passes"
         fix_runs = [c for c in calls(env) if c.get("task") == tid and "ran the project's check" in c["prompt"]]
@@ -177,7 +159,7 @@ def test_verify_gate_gives_up_and_keeps_main_clean(env, monkeypatch):
     monkeypatch.setenv("FARM_VERIFY_FIXES", "1")
     farm, t = start_farm()
     try:
-        tid = json.loads(cli("task", "add", "never passes", "--prompt", "COMMIT broken", "--json").stdout)["id"]
+        tid = json.loads(cli("spawn", "never passes", "--prompt", "COMMIT broken", "--json").stdout)["id"]
         wait_for(lambda: farm.store.get_task(tid)["status"] == "failed", timeout=60)
         assert "broken.txt" not in repo_files(env)
         assert "not landed" in farm.store.get_task(tid)["result"]
@@ -189,7 +171,7 @@ def test_timeout_resumes_the_same_session(env, monkeypatch):
     monkeypatch.setenv("FARM_TASK_TIMEOUT", "2")
     farm, t = start_farm()
     try:
-        tid = json.loads(cli("task", "add", "slow", "--prompt", "SLOW 6 COMMIT slow", "--json").stdout)["id"]
+        tid = json.loads(cli("spawn", "slow", "--prompt", "SLOW 6 COMMIT slow", "--json").stdout)["id"]
         wait_for(lambda: farm.store.get_task(tid)["status"] == "done", timeout=60)
         runs = [c for c in calls(env) if c.get("task") == tid]
         assert len(runs) == 2 and runs[1]["resume"] and "time limit" in runs[1]["prompt"]
@@ -217,7 +199,7 @@ def test_circuit_breaker_pauses_and_notifies(env, monkeypatch):
     farm, t = start_farm()
     try:
         for i in range(2):
-            cli("task", "add", f"broken {i}", "--prompt", "FAIL")
+            cli("spawn", f"broken {i}", "--prompt", "FAIL")
         wait_for(lambda: farm.store.control().get("paused"), timeout=60)
         assert "circuit breaker" in farm.store.control()["reason"]
         assert farm.store.get_snapshot() is None or farm.store.get_snapshot().status != "rejected", \
@@ -232,7 +214,7 @@ def test_build_artifacts_are_never_committed(env):
     """Regression (cloud test 2026-09-25): an auto-committed __pycache__ broke the parent's rebase onto main."""
     farm, t = start_farm()
     try:
-        tid = json.loads(cli("task", "add", "py", "--prompt", "SPAWN 1 CACHE", "--json").stdout)["id"]
+        tid = json.loads(cli("spawn", "py", "--prompt", "SPAWN 1 CACHE", "--json").stdout)["id"]
         wait_for(lambda: farm.store.get_task(tid)["status"] in ("done", "failed"), timeout=60)
         assert farm.store.get_task(tid)["status"] == "done", farm.store.get_task(tid)["result"][-500:]
         files = repo_files(env)
@@ -251,24 +233,9 @@ def test_remote_control_prompt_is_pre_answered(env):
         stop_farm(farm, t)
 
 
-def test_mission_from_env_and_from_the_cli(env, monkeypatch):
-    monkeypatch.setenv("FARM_MISSION", "Write one file.")
-    farm, t = start_farm()
-    try:
-        mission = env / "workspace" / "repo" / "MISSION.md"
-        wait_for(lambda: mission.exists())
-        assert mission.read_text().strip() == "Write one file."
-        cli("mission", "Write two files.")
-        assert mission.read_text().strip() == "Write two files."
-        assert "MISSION.md" in repo_files(env), "committed, so every worktree sees it"
-        assert "Write two files." in cli("mission").stdout
-    finally:
-        stop_farm(farm, t)
-
-
 def test_stopping_a_box_hands_its_running_task_back_at_once(env):
     farm, t = start_farm()
-    tid = json.loads(cli("task", "add", "long", "--prompt", "SLOW 30 COMMIT long", "--json").stdout)["id"]
+    tid = json.loads(cli("spawn", "long", "--prompt", "SLOW 30 COMMIT long", "--json").stdout)["id"]
     wait_for(lambda: farm.store.get_task(tid)["status"] == "running")
     stop_farm(farm, t)
     task = farm.store.get_task(tid)
@@ -284,9 +251,9 @@ def test_cli_hands_work_to_another_claude_and_schedules_it(env, monkeypatch):
         wait_for(lambda: farm.store.workers())
         out = cli("agents").stdout
         assert "test" in out and "(you)" in out
-        bad = cli("task", "add", "review", "--to", "gil", check=False)
+        bad = cli("spawn", "review", "--on", "gil", check=False)
         assert bad.returncode == 2 and "no Claude named 'gil'" in bad.stderr
-        held = json.loads(cli("task", "add", "for gil later", "--to", "gil", "--force", "--json").stdout)
+        held = json.loads(cli("spawn", "for gil later", "--on", "gil", "--force", "--json").stdout)
         sch = json.loads(cli("schedule", "add", "tick", "--prompt", "say hi", "--at", "in 1m", "--json").stdout)
         assert sch["next_at"] > time.time() + 50
         farm.store.b.put({**farm.store.b.get("SCHEDULE", sch["id"]), "next_at": time.time()})  # make it due now
@@ -296,5 +263,26 @@ def test_cli_hands_work_to_another_claude_and_schedules_it(env, monkeypatch):
         assert "cron '0 9 * * *' (Asia/Jerusalem)" in cli("schedule", "list").stdout
         assert cli("schedule", "remove", every["id"]).returncode == 0
         assert farm.store.get_task(held["id"])["status"] == "queued"  # nobody here is gil
+    finally:
+        stop_farm(farm, t)
+
+
+def test_a_new_claude_measures_its_usage_at_once_and_reads_its_messages(env, monkeypatch):
+    monkeypatch.setenv("FARM_USAGE_REFRESH", "300")
+    monkeypatch.setenv("FAKE_UTIL_5H", "0.42")
+    farm, t = start_farm()
+    try:
+        snap = wait_for(lambda: farm.store.get_snapshot(farm.seat), timeout=30)
+        assert abs(snap.five_hour.utilization - 0.42) < 1e-6  # no sub-agent ran: the usage keeper measured it
+        assert any(e["type"] == "usage.measured" for e in farm.store.events(time.time() - 60))
+        settings = json.load(open(env / "claude-home" / "settings.json"))
+        assert "clodfarm inbox --hook" in json.dumps(settings["hooks"]["UserPromptSubmit"])
+        assert cli("msg", "gil", "hi", check=False).returncode == 2  # gil isn't on this farm
+        farm.store.send_message("gil", "test", "please review the importer")
+        out = cli("inbox", "--hook").stdout
+        assert "from gil" in out and "please review the importer" in out
+        assert cli("inbox", "--hook").stdout == ""  # delivered once
+        assert cli("inbox", "--hook", extra_env={"FARM_TASK_ID": "x"}).stdout == ""  # never inside a sub-agent
+        assert "5h 58% left" in cli("agents").stdout
     finally:
         stop_farm(farm, t)

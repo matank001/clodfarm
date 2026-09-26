@@ -118,6 +118,29 @@ def install_guide():
         _atomic_write(path, new)
 
 
+HOOK_CMD = "clodfarm inbox --hook"
+
+
+def install_hooks():
+    """Show a Claude the messages other Claudes sent it: a hook in its Claude Code settings runs `clodfarm inbox --hook`
+    when a conversation starts and before each prompt; it prints new messages (nothing when there are none) and
+    Claude Code adds them to the conversation. Other settings and hooks are kept."""
+    path = os.path.join(claude_home(), "settings.json")
+    try:
+        cfg = json.load(open(path))
+    except (OSError, ValueError):
+        cfg = {}
+    hooks, changed = cfg.setdefault("hooks", {}), False
+    for event in ("SessionStart", "UserPromptSubmit"):
+        groups = hooks.setdefault(event, [])
+        if not any(h.get("command") == HOOK_CMD for g in groups for h in g.get("hooks", [])):
+            groups.append({"hooks": [{"type": "command", "command": HOOK_CMD, "timeout": 15}]})
+            changed = True
+    if changed:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        _atomic_write(path, json.dumps(cfg, indent=2))
+
+
 def trust_directory(path: str):
     """Mark a folder as trusted and onboarding as done, so unattended sessions
     (Remote Control, headless workers) never stop at a first-run dialog."""

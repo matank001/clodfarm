@@ -1,0 +1,110 @@
+<!doctype html>
+<!-- The README's architecture picture, drawn with the farm UI's own sprites. Render it:
+     scripts/render-architecture.sh  (headless Chrome -> assets/architecture.png) -->
+<html lang="en"><head><meta charset="utf-8"><title>clodfarm architecture</title>
+<link rel="stylesheet" href="../clodfarm/ui/style.css">
+<style>
+  html, body { overflow: visible; height: auto; }
+  body { margin: 0; width: 1980px; height: 944px; background: #1c3519; position: relative; }
+  #c { position: absolute; left: 300px; top: 0; width: 1680px; height: 944px; image-rendering: pixelated; }
+  #ov { position: absolute; inset: 0; }
+  #wires { position: absolute; inset: 0; pointer-events: none; }
+  .note { position: absolute; padding: 10px 14px 12px; max-width: 330px; font: 20px/1.1 var(--font-body); }
+  .note h4 { font: 11px/1.5 var(--font-px); margin: 0 0 6px; color: var(--clay-2); letter-spacing: .5px; font-weight: 400; }
+  .note code { font: 19px var(--font-body); color: var(--ink-2); background: #fff; padding: 0 4px; border-radius: 3px; }
+  .note .hp { margin-top: 6px; }
+  .title { position: absolute; left: 1140px; top: 22px; transform: translateX(-50%); display: flex; padding: 5px; background: var(--paper);
+    border: 4px solid var(--ink); border-radius: 4px; box-shadow: 0 4px 0 var(--shadow); }
+  .title span { font: 14px/1 var(--font-px); padding: 11px 14px; }
+  .title span:first-child { color: #fff; background: var(--sky); }
+  .title span:last-child { background: var(--sky-2); border: 2px solid var(--sky); border-left: 0; }
+  .col { position: absolute; left: 0; top: 0; width: 300px; height: 944px; background: #28501f; box-shadow: inset -6px 0 0 #1c3519; }
+  .col h3 { position: absolute; left: 34px; top: 190px; font: 12px/1.6 var(--font-px); color: #ffd59e; text-shadow: 2px 2px 0 #1b2410; }
+  .rc { position: absolute; font: 10px var(--font-px); color: #fff; background: rgba(22,30,12,.75); padding: 6px 8px; border-radius: 4px; }
+  .phone { position: absolute; width: 250px; height: 430px; background: #1c2233; border: 5px solid #0e121c; border-radius: 30px;
+    box-shadow: 0 6px 0 rgba(18,22,12,.35); padding: 34px 12px 14px; }
+  .phone .scr { background: var(--paper); border-radius: 10px; height: 100%; padding: 12px 10px; display: flex; flex-direction: column; gap: 9px; }
+  .phone .app { font: 9px/1.4 var(--font-px); color: var(--clay-2); }
+  .msg { font: 19px/1.05 var(--font-body); padding: 7px 9px; border: 3px solid var(--ink); border-radius: 8px; background: #fff; max-width: 90%; }
+  .msg.me { align-self: flex-end; background: #fde6df; }
+  .tagname { position: absolute; font: 10px var(--font-px); color: #fff; text-shadow: 2px 2px 0 #1b2410; transform: translateX(-50%); }
+  .bubble { position: absolute; transform: translate(-50%, -100%); }
+</style></head>
+<body data-page="diagram">
+<canvas id="c"></canvas>
+<svg id="wires" viewBox="0 0 1980 944"></svg>
+<div id="ov"></div>
+<script src="../clodfarm/ui/app.js"></script>
+<script>
+"use strict";
+const S = 4, W = 420, H = 236, cv = document.getElementById("c"), g = cv.getContext("2d"), ov = document.getElementById("ov");
+cv.width = W; cv.height = H; g.imageSmoothingEnabled = false;
+const { L, bg, fg } = buildWorld(W, H, 11, {});
+g.drawImage(bg, 0, 0);
+const put = (img, x, y) => g.drawImage(img, Math.round(x - img.width / 2), Math.round(y - img.height));
+const colMatan = HAT_COLORS[1], colGil = HAT_COLORS[2], colNoa = HAT_COLORS[4];
+const [p0, , p2] = L.plots;
+for (const p of [p0, p2]) for (let k = 0; k < 3; k++) drawCrop(g, p.x + 5 + k * 8, p.y + p.h - 3, "grow", k, false);
+for (let k = 0; k < 3; k++) drawCrop(g, L.plots[5].x + 5 + k * 8, L.plots[5].y + L.plots[5].h - 3, "ripe", k, true);
+// the Claudes: matan with its sub-agents (one runs on gil's budget), gil with its own, noa napping by the barn
+const matan = { x: p0.x - 7, y: p0.y + p0.h }, gil = { x: p2.x - 7, y: p2.y + p2.h }, noa = { x: L.plots[3].x + 30, y: L.plots[3].y - 18 };
+put(critterSprite("straw", colMatan, { legs: 0, arms: 1 }), matan.x, matan.y + 1); g.drawImage(LAPTOP_ON, matan.x + 4, matan.y - 6);
+put(critterSprite("beanie", colGil, { legs: 0, arms: 1 }), gil.x, gil.y + 1); g.drawImage(LAPTOP_ON, gil.x + 4, gil.y - 6);
+put(critterSprite("cap", colNoa, { legs: 0, sleep: true }), noa.x, noa.y + 1);
+const mini = (c, x, y) => { put(miniSprite(c, { arms: 1 }), x, y + 1); g.fillStyle = "#1b1f2a"; g.fillRect(x + 3, y - 4, 4, 3); g.fillStyle = "#7cfc9a"; g.fillRect(x + 4, y - 3, 2, 1); };
+const minisM = [[p0.x + 4, p0.y - 2, colMatan], [p0.x + 22, p0.y - 2, colGil], [p0.x + 13, p0.y + p0.h + 9, colMatan]];
+minisM.forEach(([x, y, c]) => mini(c, x, y));
+mini(colGil, p2.x + 13, p2.y - 2);
+// the schedule board by the barn
+const b = L.board;
+g.fillStyle = "#4a3120"; g.fillRect(b.x + 2, b.y + 4, 2, b.h + 4); g.fillRect(b.x + b.w - 4, b.y + 4, 2, b.h + 4);
+g.fillStyle = "#3a2616"; g.fillRect(b.x, b.y, b.w, b.h - 2); g.fillStyle = "#8a6038"; g.fillRect(b.x + 1, b.y + 1, b.w - 2, b.h - 4);
+for (let i = 0; i < 3; i++) { const nx = b.x + 3 + i * 7, ny = b.y + 5; g.fillStyle = "#f6f1e4"; g.fillRect(nx, ny, 5, 5); g.fillStyle = "#c0392b"; g.fillRect(nx + 2, ny, 1, 1); }
+g.drawImage(fg, 0, 0);
+
+// ------------------------------------------------------------ overlays (world px * S)
+const OX = 300, at = (x, y) => ({ left: OX + x * S + "px", top: y * S + "px" });
+const el = (tag, cls, style, html) => { const e = document.createElement(tag); if (cls) e.className = cls; Object.assign(e.style, style); if (html != null) e.innerHTML = html; ov.append(e); return e; };
+const bubble = (name, x, y, text) => { const e = el("div", "bubble", at(x, y), `<img src="${icon(name)}" alt="">` + (text ? `<span>${text}</span>` : "")); return e; };
+const hp = (label, left) => `<div class="hp"><span>${label}</span><div class="bar"><i class="${left > .5 ? "" : left > .2 ? "mid" : "low"}" style="width:${left * 100}%"></i></div><span class="lbl">${Math.round(left * 100)}% LEFT</span></div>`;
+const tag = (name, x, y) => el("div", "tagname", at(x, y + 3), name);
+tag("MATAN", matan.x, matan.y); tag("GIL", gil.x, gil.y); tag("NOA", noa.x, noa.y);
+bubble("terminal", matan.x, matan.y - 24, "3 SUB-AGENTS"); bubble("terminal", gil.x, gil.y - 24, "1 SUB-AGENT"); bubble("zzz", noa.x, noa.y - 22);
+
+el("div", "goal title", {}, `<span class="goal-label">HOW</span><span class="goal-text">CLODFARM WORKS</span>`);
+
+el("div", "col", {}, "<h3>YOU, ON<br>YOUR PHONE</h3>");
+const phone = el("div", "phone", { left: "25px", top: "250px" }, `<div class="scr">
+  <div class="app">CLAUDE APP → CODE → MATAN</div>
+  <div class="msg me">refactor the importer, and have gil's Claude take the batching part</div>
+  <div class="msg">On it: 3 sub-agents. Batching runs on gil's account, mine is at 65%.</div>
+  <div class="msg me">every weekday at 9, triage new issues</div>
+  <div class="msg">Scheduled (Asia/Jerusalem).</div></div>`);
+
+const n1 = el("div", "note panel", { left: "330px", top: "440px", maxWidth: "300px" },
+  `<h4>1 · YOU TALK TO YOUR CLAUDE</h4>From the Claude app, over Remote Control. Each Claude is one person's account: yours, gil's, noa's.`);
+const n2 = el("div", "note panel", { left: (OX + p0.x * S - 20) + "px", top: "620px", maxWidth: "380px" },
+  `<h4>2 · SUB-AGENTS YOU CAN SEE</h4><code>clodfarm spawn</code> starts one: a mini Claude in its own git worktree. No <code>--on</code>? It runs on whichever Claude has budget free: <b style="color:${colGil}">this one</b> runs on gil's.`);
+const n3 = el("div", "note panel", { left: "1560px", top: "560px", maxWidth: "380px" },
+  `<h4>3 · BUDGET, REAL TIME</h4>Every account is paced on its real 5-hour and 7-day usage: live from every run, measured on login and when idle. Noa is resting to keep room for her own Claude.
+   ${hp("5H", .65)}${hp("7D", .78)}`);
+const n4 = el("div", "note panel", { left: "1150px", top: "150px", maxWidth: "340px" },
+  `<h4>4 · CLAUDES WORK TOGETHER</h4><code>clodfarm msg gil "…"</code> lands in gil's next turn. <code>clodfarm agents</code> shows who has budget left.`);
+const n5 = el("div", "note panel", { left: "330px", top: "690px", maxWidth: "420px" },
+  `<h4>5 · THE BARN AND THE BOARD</h4>One store (SQLite, or DynamoDB across boxes) and one git repo. Sub-agents land on main when your tests pass. The board runs schedules: <code>--cron</code>, <code>--every</code>, <code>--at</code>.`);
+
+// wires: dashed pixel lines from each note to what it explains
+const wires = document.getElementById("wires");
+const line = (x1, y1, x2, y2) => wires.insertAdjacentHTML("beforeend", `<path d="M${x1} ${y1} L${x2} ${y2}" stroke="#1f2a44" stroke-width="4" stroke-dasharray="8 6" fill="none"/><rect x="${x2 - 6}" y="${y2 - 6}" width="12" height="12" fill="#f4f1e8" stroke="#1f2a44" stroke-width="3"/>`);
+const S2 = (x, y) => [OX + x * S, y * S];
+const box = (e) => e.getBoundingClientRect();
+line(275, 430, ...S2(matan.x - 12, matan.y - 8));
+el("div", "rc", { left: "310px", top: "388px" }, "REMOTE CONTROL");
+line(...S2(matan.x + 34, matan.y - 12), ...S2(gil.x - 12, gil.y - 12));
+line(box(n4).left + 60, box(n4).bottom, ...S2(gil.x - 40, gil.y - 14));
+line(box(n2).left + 90, box(n2).top, ...S2(p0.x + 22, p0.y - 8));
+line(box(n3).left + 60, box(n3).top, ...S2(noa.x, noa.y - 4));
+line(box(n5).right - 120, box(n5).top, ...S2(L.barn.x + L.barn.w / 2, L.barn.y + L.barn.h + 2));
+line(box(n5).right - 40, box(n5).top, ...S2(L.board.x + L.board.w / 2, L.board.y + L.board.h + 6));
+</script>
+</body></html>

@@ -14,7 +14,7 @@ body:
     id: repro
     attributes:
       label: Steps to reproduce
-      placeholder: "1. docker compose up -d\n2. clodfarm task add ...\n3. ..."
+      placeholder: "1. docker compose up -d\n2. clodfarm spawn ...\n3. ..."
     validations: {required: true}
   - type: textarea
     id: logs

@@ -112,20 +112,6 @@ def test_snapshot_keeps_only_the_newest(store):
     assert store.get_snapshot().five_hour.utilization == 0.5
 
 
-def test_planner_single_flight(store):
-    assert store.planner_try_start(600)
-    assert not store.planner_try_start(600)
-
-
-def test_planner_backs_off_when_idle(store):
-    store.planner_try_start(10)
-    store.planner_backoff(0, 10, 1000)
-    first = store.planner_state()["next_allowed"]
-    store.planner_backoff(0, 10, 1000)
-    assert store.planner_state()["next_allowed"] > first
-    assert store.planner_state()["idle_runs"] == 2
-
-
 def test_pause_switch(store):
     store.set_paused(True, "maintenance")
     assert store.control()["paused"] is True
@@ -221,3 +207,18 @@ def test_schedules_fire_once_per_due_time_on_any_box(store):
     finally:
         st.now = real
     assert store.remove_schedule(cron["id"]) and not store.remove_schedule(cron["id"])
+
+
+def test_sub_agents_inherit_their_claude(store):
+    top = store.add_task("big job", "x", owner="gil")
+    child = store.add_task("part", "x", parent=top["id"], owner="someone-else")
+    assert child["owner"] == "gil"  # the Claude that started the tree owns all of it
+
+
+def test_messages_between_claudes(store):
+    store.send_message("jestr", "gil", "can you review the importer?")
+    store.send_message("jestr", "noa", "not for gil")
+    got = store.inbox("gil")
+    assert [m["text"] for m in got] == ["can you review the importer?"] and got[0]["from"] == "jestr"
+    assert store.inbox("gil") == []  # read now
+    assert len(store.inbox("gil", unread_only=False)) == 1

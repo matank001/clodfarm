@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.4.0 (2026-09-26)
+
+One Claude per account, sub-agents you can see, and Claudes that work together.
+
+- **The farm shows Claudes, not workers or a queue.** One critter per Claude (a person's account). The sub-agents
+  it starts are mini Claudes around its plot, tinted with the colour of the Claude whose account runs them. Tap a
+  Claude for its budget, its sub-agents and the link to talk to it; tap a sub-agent for its job and where it runs.
+- **New CLI for the Claudes and you:** `clodfarm spawn` (start a sub-agent; any Claude with budget runs it, or
+  `--on NAME`), `subagents`, `result ID [--wait]`, `cancel`, `retry`; `clodfarm agents` shows every Claude's 5-hour
+  and 7-day budget left and how many more sub-agents it can start; `clodfarm msg NAME TEXT` and `clodfarm inbox`
+  for messages between Claudes. New messages appear in a Claude's next conversation turn (a Claude Code hook the
+  farm installs). The farm guide teaches budget, saving it by running sub-agents elsewhere, and collaboration.
+- **Usage in real time:** a new Claude's usage is measured the moment it logs in, and an idle Claude is re-measured
+  every `FARM_USAGE_REFRESH` seconds (300); runs keep reporting it live.
+- **Removed:** the planner, `MISSION.md`, `clodfarm mission`, `FARM_PLANNER*`, `FARM_MISSION` and the
+  `clodfarm task ...` commands (use `spawn` / `subagents` / `result`). `schedule add --to` is now `--on`.
+- The README has a new architecture picture, drawn with the farm's own sprites (`scripts/architecture.html`).
+
 ## 0.3.0 (2026-09-26)
 
 Simpler: you talk to your Claude, and it runs the farm.

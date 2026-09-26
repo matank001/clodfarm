@@ -36,10 +36,8 @@ class Config:
     remote_control: bool
     rc_spawn: str
     rc_capacity: int
-    planner: bool
-    planner_cooldown: int
-    planner_max_backoff: int
     max_queue: int
+    usage_refresh: int  # measure this account's usage when nothing measured it for this many seconds (0 = off)
     max_depth: int
     max_attempts: int
     max_resumes: int
@@ -66,10 +64,6 @@ class Config:
     @property
     def repo_dir(self) -> str:
         return os.path.join(self.workspace, "repo")
-
-    @property
-    def mission_paths(self) -> list[str]:
-        return [os.path.join(self.repo_dir, "MISSION.md"), os.path.join(self.workspace, "MISSION.md")]
 
 
 def _store_kind() -> str:
@@ -98,10 +92,8 @@ def load() -> Config:
         remote_control=_bool("FARM_REMOTE_CONTROL", True),
         rc_spawn=_env("FARM_RC_SPAWN", "worktree"),
         rc_capacity=int(_env("FARM_RC_CAPACITY", "4")),
-        planner=_bool("FARM_PLANNER", False),  # opt in: plan from MISSION.md whenever the queue runs dry
-        planner_cooldown=int(_env("FARM_PLANNER_COOLDOWN", "600")),
-        planner_max_backoff=int(_env("FARM_PLANNER_MAX_BACKOFF", "21600")),
         max_queue=int(_env("FARM_MAX_QUEUE", "25")),
+        usage_refresh=int(_env("FARM_USAGE_REFRESH", "300")),
         max_depth=int(_env("FARM_MAX_DEPTH", "3")),
         max_attempts=int(_env("FARM_MAX_ATTEMPTS", "3")),
         max_resumes=int(_env("FARM_MAX_RESUMES", "5")),

@@ -1,7 +1,7 @@
 #!/bin/sh
 # clodfarm installer: one container, one login.
 #   curl -fsSL https://raw.githubusercontent.com/matank001/clodfarm/main/scripts/install.sh | sh
-# Options (environment): any FARM_* setting, e.g. FARM_MISSION="..." FARM_VERIFY_CMD="pytest -q"; CLAUDE_FARM_IMAGE, CLAUDE_FARM_NAME
+# Options (environment): any FARM_* setting, e.g. FARM_VERIFY_CMD="pytest -q"; CLAUDE_FARM_IMAGE, CLAUDE_FARM_NAME
 set -eu
 IMAGE="${CLAUDE_FARM_IMAGE:-ghcr.io/matank001/clodfarm:latest}"
 NAME="${CLAUDE_FARM_NAME:-clodfarm}"
@@ -53,9 +53,8 @@ cat <<MSG
 
   Farm UI:            http://localhost:$PORT   password: $PWTXT
 
-  Give it a mission:  docker exec $NAME clodfarm mission "Build a CSV to Markdown CLI with tests"
-  Or a single task:   docker exec $NAME clodfarm task add "Add a --align flag" --prompt "..."
-  Watch it:           docker exec $NAME clodfarm status      (or: docker logs -f $NAME)
-  From your phone:    Claude app -> Code -> "clodfarm"
+  Talk to it:         Claude app -> Code -> "clodfarm" (on your phone or at claude.ai/code)
+  Add teammates:      in the farm UI, + NEW CLAUDE: each logs in with their own account
+  Watch it:           docker exec $NAME clodfarm status      (or the farm UI, or: docker logs -f $NAME)
 
 MSG

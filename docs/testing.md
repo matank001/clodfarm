@@ -9,7 +9,7 @@
   - priority order and atomic claims under 5-way contention;
   - the depth limit, parent wait/resume, and children finishing during the parent's run;
   - retries, lease reaping and lease ownership;
-  - account-wide slots, snapshot ordering, the planner single-flight and back-off, pause, and spend totals.
+  - account-wide slots, snapshot ordering, pause, spend totals, sub-agent owners, messages and schedules.
 - `test_farm.py` runs the real supervisor, store and git flow, driven by `tests/fake_claude.py`, which speaks Claude
   Code's stream-json protocol. Covered:
   - a parent spawns sub-agents, is resumed once in its own session, merges them, and everything lands on main with
@@ -17,7 +17,6 @@
   - the Remote Control keeper;
   - a rate-limit rejection pauses the farm and gives the attempt back;
   - the 5-hour throttle;
-  - the planner working from `MISSION.md`;
   - pause and resume;
   - the farm guide reaching agents.
 
@@ -32,7 +31,7 @@ The task: write `strutil.slugify` yourself, delegate `truncate` to exactly one s
   - The sub-agent was spawned, finished, and the parent was resumed.
   - But the parent's unfinished work had reached main while it waited, so the child conflicted. That produced two
     chained "resolve merge conflict" tasks before converging.
-  - This led to the current hierarchical design: sub-tasks branch from the parent, and the parent merges them.
+  - This led to the current hierarchical design: sub-agents branch from the parent, and the parent merges them.
 - **Run 2** used the hierarchical design.
   - Parent run 32.5 s (1,374 output tokens), child 28.3 s (1,270), resumed parent 37.1 s (396).
   - The parent merged the child branch without conflicts.
@@ -87,7 +86,7 @@ The task: write `strutil.slugify` yourself, delegate `truncate` to exactly one s
   - `curl … | FARM_VERIFY_CMD=… sh` pulled the arm64 image, reused the login, and passed the settings through.
   - The governor showed "1/3 allowed … (keeping 1 agent working)", and Remote Control was live.
   - The parent task wrote slugify, committed, spawned one sub-agent, and waited.
-  - **The container was restarted mid-run.** The stopping box logged `task.restart`, and the sub-task was
+  - **The container was restarted mid-run.** The stopping box logged `task.restart`, and the sub-agent was
     re-claimed within seconds and finished.
   - The parent resumed in its own session and merged the child's branch. `verify.passed` ran the unit tests, and
     2 commits merged onto main.

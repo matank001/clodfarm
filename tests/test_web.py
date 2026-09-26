@@ -118,7 +118,7 @@ def test_released_agent_takes_its_workers_along(ui):
     farm_ui.store.heartbeat("far-box@elsewhere", "w0", "idle")  # a real visitor from another box
     time.sleep(1.1)
     names = {x["id"] for x in call(base + "/api/state")[1]["agents"]}
-    assert a["id"] in names and "far-box@elsewhere" in names and "ghost@" + socket.gethostname() not in names
+    assert a["id"] in names and "far-box" in names and "ghost" not in names
     assert call(base + f"/api/agents/{a['id']}/remove", {})[0] == 200
     assert not farm_ui.manager.alive(a["id"])
     stale = {**farm_ui.manager.primary(), **a, "primary": False, "config_dir": "/nonexistent"}
@@ -195,3 +195,19 @@ def test_path_prefix_behind_a_proxy(env, backend, monkeypatch):
         for k in ("FARM_UI_BASE", "FARM_UI_TRUST_PROXY", "FARM_UI_SECURE"):
             monkeypatch.delenv(k, raising=False)
         importlib.reload(web)
+
+
+def test_state_is_claudes_and_their_sub_agents(ui):
+    base, farm_ui = ui
+    call = client()
+    login(call, base)
+    me = farm_ui.cfg.name
+    top = farm_ui.store.add_task("refactor", "x", owner=me)
+    farm_ui.store.add_task("part 1", "x", parent=top["id"], to="gil")
+    farm_ui.store.claim_next(f"{me}@h/w0", 300, agent=me)
+    farm_ui.store.heartbeat(f"{me}@h", "w0", "running", top["id"], seat="s1")
+    st = call(base + "/api/state")[1]
+    assert "workers" not in st["agents"][0] and "tasks" not in st and "counts" not in st
+    subs = {t["title"]: t for t in st["subagents"]}
+    assert subs["refactor"]["owner"] == me and subs["refactor"]["on"] == me
+    assert subs["part 1"]["owner"] == me and subs["part 1"]["to"] == "gil" and subs["part 1"]["status"] == "queued"

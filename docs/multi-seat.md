@@ -2,18 +2,18 @@
 
 A single box keeps its farm in a SQLite file. A **farm spread over several boxes** is one DynamoDB table
 (`FARM_STORE=dynamodb`). Every box (container) pointed at the same table shares:
-- **one task queue:** any box can pick up any task, including sub-tasks of a parent that runs elsewhere;
+- **one farm:** any box whose account has budget can run any sub-agent (unless it is pinned with `--on`), including the sub-agents of a parent that runs elsewhere;
 - **one git origin:** task branches travel through it, so work started on one box can be merged on another.
 
 The **budget is per seat.** A seat is the Claude account a box is logged in to. Each box works out its seat from its
 own login (for example `matan-3f2a`; the full email is never stored). Usage snapshots, concurrency slots and API
 spend are all kept per seat, and the governor paces every seat against **its own** real 5-hour and weekly
 utilization. So when one person's account hits a limit or gets close to its target, only that seat's boxes pause.
-The others keep taking work from the same queue.
+The others keep running the farm's sub-agents.
 
 ```
             ┌──────────── DynamoDB table (the farm) ────────────┐
-            │  shared queue · events · per-seat budget + slots  │
+            │  sub-agents · events · per-seat budget + slots    │
             └──────┬───────────────────┬───────────────────┬────┘
                    │                   │                   │
    box A (seat matan-3f2a)   box B (seat matan-3f2a)   box C (seat gil-9c1d)
@@ -60,7 +60,7 @@ Then give the box AWS credentials for that table, and run:
 **3. See every seat:**
 ```
 $ clodfarm budget
-BUDGET per Claude account (seat), from Claude Code's own rate-limit reports; the queue is shared
+BUDGET per Claude account (seat), from Claude Code's own rate-limit reports
 SEAT gil-9c1d  boxes: farm-gil@b7e1
   5-hour    22% used   limit for agents 85%   resets Fri 18:00Z (in 3.1h)
   7-day     31% used   limit for agents 80%   resets Mon 07:00Z (in 3.2d)
@@ -73,9 +73,9 @@ SEAT matan-3f2a  boxes: clodfarm@a1c2, farm-2@c3d4
 
 ## How work moves between boxes
 
-- A task's branch is pushed to origin whenever it stays open: a parent waiting for sub-tasks, or a finished
-  sub-task waiting for its parent.
-  - A sub-task on any box branches from its parent's pushed branch.
+- A task's branch is pushed to origin whenever it stays open: a parent waiting for sub-agents, or a finished
+  sub-agent waiting for its parent.
+  - A sub-agent on any box branches from its parent's pushed branch.
   - When the parent resumes, it fetches its children's branches and merges them.
   - When a top-level task lands on main, its whole tree of task branches is deleted from origin.
 - **Sessions stay home.** A parent's conversation lives on the box it ran on. For `FARM_RESUME_AFFINITY` seconds

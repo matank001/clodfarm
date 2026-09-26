@@ -1,23 +1,22 @@
-"""clodfarm command line. Humans and agents use the same commands.
+"""clodfarm command line. You, and every Claude on the farm, use the same commands.
 
     clodfarm run                      start the farm daemon (the container does this)
     clodfarm login | logout | whoami  Claude subscription login (see docs/auth.md)
-    clodfarm status                   workers, queue, budget in one screen
-    clodfarm budget [--refresh]       subscription usage and what the governor allows
-    clodfarm task add TITLE [--prompt TEXT | --prompt-file F | -] [--parent ID] [--priority 0-9] [--to AGENT]
-    clodfarm task list [--status S] | show ID | cancel ID | retry ID
-    clodfarm agents                   the Claudes on this farm (hand one a task with `task add --to NAME`)
-    clodfarm schedule add TITLE (--cron "0 9 * * 1-5" [--tz Europe/Berlin] | --every 2h | --at 2026-10-01T09:00 | --at "in 3h")
-                          [--prompt TEXT] [--to AGENT]
+    clodfarm status                   the Claudes, their budget and the sub-agents at work
+    clodfarm agents                   the Claudes on this farm and the budget each has left
+    clodfarm budget [--refresh]       every account's 5-hour and 7-day usage and what the governor allows
+    clodfarm spawn TITLE [--prompt TEXT | --prompt-file F | -] [--on NAME]   start a sub-agent
+    clodfarm subagents [--all] [--mine] | result ID [--wait] | cancel ID | retry ID
+    clodfarm msg NAME TEXT | inbox    talk to the other Claudes on the farm
+    clodfarm schedule add TITLE (--cron "0 9 * * 1-5" [--tz Europe/Berlin] | --every 2h | --at "in 3h") [--prompt TEXT] [--on NAME]
     clodfarm schedule list | remove ID
-    clodfarm mission [TEXT | -f FILE]  show or set MISSION.md (the planner keeps agents busy with it)
     clodfarm events [-n 30] [-f]      the farm's event log
-    clodfarm pause [REASON] | resume  stop or restart new work on every farm sharing the table
+    clodfarm pause [REASON] | resume  stop or restart new sub-agents on every box
     clodfarm ui | ui-passwd           serve the farm UI on its own | set its password
     clodfarm init                     create the DynamoDB table
-    clodfarm doctor                   check claude, login, DynamoDB, git and the workspace
+    clodfarm doctor                   check claude, login, the store, git and the workspace
 
-Add --json to status, budget, task list/show and events for machine-readable output.
+Add --json for machine-readable output.
 """
 
 from __future__ import annotations
@@ -138,7 +137,7 @@ def _seat_text(r) -> str:
 
 
 def _budget_text(rows) -> str:
-    head = "BUDGET per Claude account (seat), from Claude Code's own rate-limit reports; the queue is shared"
+    head = "BUDGET per Claude account (seat), from Claude Code's own rate-limit reports"
     return "\n".join([head] + [_seat_text(r) for r in rows])
 
 
@@ -164,39 +163,74 @@ def cmd_budget(cfg, a):
 
 
 def _task_line(t) -> str:
-    extra = f" <- {t['parent']}" if t.get("parent") else ""
-    who = f" [{t.get('worker', '').split('/')[-1]}]" if t.get("status") == "running" else ""
-    return f"  {t['id']}  {t['status']:<9} p{t.get('priority', 5)}  {_ago(t.get('updated')):>5}  {t['title'][:70]}{extra}{who}"
+    on = t.get("worker", "").split("@")[0] if t.get("status") == "running" else t.get("to") or ""
+    return (f"  {t['id']}  {t['status']:<9} {_ago(t.get('updated')):>5}  {('on ' + on) if on else '':<14} "
+            f"{t['title'][:64]}" + (f"  (for {t['owner']})" if t.get("owner") else "")
+            + (f"  <- {t['parent']}" if t.get("parent") else ""))
+
+
+def _claudes(cfg, store) -> list[dict]:
+    """Every Claude on the farm that is up (by name: the part of a box id before '@'), with its budget."""
+    seats = {r["seat"]: r for r in _seats(cfg, store)}
+    out: dict[str, dict] = {}
+    for w in store.workers():
+        box = w["SK"].rsplit("/", 1)[0]
+        name = box.split("@")[0]
+        c = out.setdefault(name, {"name": name, "me": name == cfg.name, "seat": w.get("seat"), "boxes": set(),
+                                  "running": 0})
+        c["boxes"].add(box)
+        c["seat"] = c["seat"] or w.get("seat")
+        c["running"] += w.get("state") == "running"
+    for c in out.values():
+        r = seats.get(c["seat"]) or {}
+        snap, d = r.get("snapshot"), r.get("decision")
+        c.update(boxes=sorted(c["boxes"]),
+                 five_hour_left=None if not (snap and snap.five_hour) else round(1 - snap.five_hour.utilization, 3),
+                 seven_day_left=None if not (snap and snap.seven_day) else round(1 - snap.seven_day.utilization, 3),
+                 can_start=max(0, (d.workers if d else 0) - c["running"]), reason=d.reason if d else "",
+                 resets=d.pause_until if d else None)
+    return sorted(out.values(), key=lambda c: (not c["me"], c["name"]))
+
+
+def _claude_line(c) -> str:
+    pct = lambda x: "?" if x is None else f"{x:.0%}"  # noqa: E731
+    left = f"5h {pct(c['five_hour_left'])} left · 7d {pct(c['seven_day_left'])} left"
+    busy = f"{c['running']} sub-agent{'s' if c['running'] != 1 else ''} running"
+    room = f"can start {c['can_start']} more" if c["can_start"] else \
+        f"{'no room for more' if c['running'] else 'resting'}: {c['reason']}" \
+        + (f" (until {_until(c['resets'])})" if c.get("resets") else "")
+    return f"  {c['name']:<16}{'(you)' if c['me'] else '     '}  {left} · {busy} · {room}"
+
+
+def cmd_agents(cfg, a):
+    rows = _claudes(cfg, _store(cfg))
+    _out(rows, a.json, "CLAUDES on this farm (each is its own Claude account and budget)\n"
+         + ("\n".join(_claude_line(c) for c in rows) or "  (none up: is `clodfarm run` running?)")
+         + "\n\nStart a sub-agent: clodfarm spawn \"<title>\" --prompt \"...\"  (any Claude with budget runs it; "
+           "--on NAME picks one)\nMessage a Claude:  clodfarm msg NAME \"<text>\"")
+    return 0
 
 
 def cmd_status(cfg, a):
     store = _store(cfg)
-    rows = _seats(cfg, store)
-    counts = {s: store.count(s) for s in ("queued", "running", "waiting", "done", "failed")}
-    workers = store.workers()
-    ctl = store.control()
+    rows, ctl = _claudes(cfg, store), store.control()
+    active = store.list_tasks("running") + store.list_tasks("waiting") + store.list_tasks("queued", 20)
     if a.json:
-        _out({"farm": cfg.farm_id, "paused": ctl, "counts": counts, "workers": workers, "seats": _seats_json(rows)},
-             True, "")
+        _out({"farm": cfg.farm_id, "paused": ctl, "claudes": rows, "subagents": active}, True, "")
         return 0
-    print(f"clodfarm {__version__}  box {cfg.farm_id}  store {_store(cfg).describe()}"
+    print(f"clodfarm {__version__}  {cfg.farm_id}  store {store.describe()}"
           + (f"  PAUSED: {ctl.get('reason') or 'by hand'}" if ctl.get("paused") else ""))
-    print(_budget_text(rows))
-    rc = [e for e in store.events(now() - 7 * 86400, 500) if e["type"] == "rc.connected"]
-    if rc:
-        print(f"REMOTE    {rc[-1]['msg']}")
-    print("QUEUE     " + "  ".join(f"{k} {v}" for k, v in counts.items()))
-    print("WORKERS")
-    for w in sorted(workers, key=lambda w: w["SK"]):
-        print(f"  {w['SK']:<40} {w.get('seat') or '':<16} {_ago(w.get('at')):>5}  {w.get('state', '')}"
-              f"{'  ' + w['task'] if w.get('task') else ''}")
-    if not workers:
-        print("  (none: is `clodfarm run` up?)")
-    active = store.list_tasks("running") + store.list_tasks("waiting") + store.list_tasks("queued", 10)
-    if active:
-        print("TASKS")
-        for t in active:
-            print(_task_line(t))
+    print("CLAUDES")
+    print("\n".join(_claude_line(c) for c in rows) or "  (none up: is `clodfarm run` running?)")
+    links = {}
+    for e in store.events(now() - 7 * 86400, 2000):
+        if e["type"] == "rc.connected":
+            links[e["msg"].split("'")[1] if "'" in e["msg"] else "?"] = e["msg"].rsplit(" ", 1)[-1]
+    for name, url in sorted(links.items()):
+        print(f"  talk to {name}: {url}")
+    print("SUB-AGENTS" + ("" if active else "  (none running)"))
+    for t in active:
+        print(_task_line(t))
     return 0
 
 
@@ -208,90 +242,115 @@ def _read_prompt(a) -> str:
     return a.prompt or a.title
 
 
-def cmd_task(cfg, a):
+def _names(cfg, store) -> set[str]:
+    return {c["name"] for c in _claudes(cfg, store)}
+
+
+def cmd_spawn(cfg, a):
     store = _store(cfg)
-    if a.sub == "add":
-        parent = a.parent or None
-        by = os.environ.get("FARM_TASK_ID") or "human"
-        try:
-            if store.count("queued") >= cfg.max_queue and by != "human":
-                print(f"queue is full ({cfg.max_queue} queued): not adding. Finish or cancel work first.", file=sys.stderr)
-                return 3
-            to = (a.to or "").strip() or None
-            if to and to not in _agent_names(store) and not a.force:
-                print(f"no Claude named '{to}' is on the farm right now ({', '.join(sorted(_agent_names(store))) or 'none'});"
-                      " check `clodfarm agents`, or add --force to queue it for when it joins", file=sys.stderr)
-                return 2
-            t = store.add_task(a.title, _read_prompt(a), priority=a.priority, parent=parent, created_by=by,
-                               max_depth=cfg.max_depth, max_attempts=cfg.max_attempts, to=to)
-        except ValueError as e:
-            print(str(e), file=sys.stderr)
+    me = os.environ.get("FARM_TASK_ID")  # set when a sub-agent spawns: its own sub-agents become its children
+    parent = None if a.detach else (a.parent or me)
+    try:
+        if me and store.count("queued") >= cfg.max_queue:
+            print(f"{cfg.max_queue} sub-agents are already waiting: not adding. Do it yourself or wait.", file=sys.stderr)
+            return 3
+        on = (a.on or "").strip() or None
+        if on and on not in _names(cfg, store) and not a.force:
+            print(f"no Claude named '{on}' is on the farm right now ({', '.join(sorted(_names(cfg, store))) or 'none'});"
+                  " see `clodfarm agents`, or add --force to wait for it", file=sys.stderr)
             return 2
-        _out(t, a.json, f"queued {t['id']}: {t['title']}" + (f" (sub-task of {parent})" if parent else "")
-             + (f" for {t['to']}" if t.get("to") else ""))
-        return 0
-    if a.sub == "list":
-        ts = store.list_tasks(a.status, a.limit)
-        _out(ts, a.json, "\n".join(_task_line(t) for t in ts) or "(no tasks)")
-        return 0
-    if a.sub == "show":
+        t = store.add_task(a.title, _read_prompt(a), parent=parent, created_by=me or cfg.name, to=on,
+                           owner=os.environ.get("FARM_OWNER") or cfg.name, max_depth=cfg.max_depth,
+                           max_attempts=cfg.max_attempts)
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 2
+    _out(t, a.json, f"started sub-agent {t['id']}: {t['title']}" + (f" on {t['to']}" if t.get("to") else "")
+         + (f" (child of {parent})" if parent else "") + f". Its result: clodfarm result {t['id']}")
+    return 0
+
+
+def cmd_subagents(cfg, a):
+    store = _store(cfg)
+    ts = store.list_tasks("running") + store.list_tasks("waiting") + store.list_tasks("queued", 50)
+    if a.all:
+        ts += store.list_tasks("done", 20) + store.list_tasks("failed", 10) + store.list_tasks("cancelled", 10)
+    if a.mine:
+        ts = [t for t in ts if t.get("owner") == cfg.name]
+    _out(ts, a.json, "\n".join(_task_line(t) for t in ts) or "(no sub-agents running)")
+    return 0
+
+
+def cmd_result(cfg, a):
+    store = _store(cfg)
+    t = store.get_task(a.id)
+    end = time.time() + a.timeout
+    while t and a.wait and t["status"] in ("queued", "running", "waiting") and time.time() < end:
+        time.sleep(5)
         t = store.get_task(a.id)
-        if not t:
-            print("no such task", file=sys.stderr)
-            return 1
-        t["runs"] = store.runs(a.id)
-        if a.json:
-            _out(t, True, "")
-            return 0
-        print(f"{t['id']}  {t['status']}  priority {t.get('priority')}  depth {t.get('depth', 0)}  attempts {t.get('attempts', 0)}")
-        print(f"title:   {t['title']}")
-        for k in ("parent", "children", "worker", "branch", "session_id"):
-            if t.get(k):
-                print(f"{k + ':':<9}{t[k]}")
-        print(f"\nprompt:\n{t['prompt']}\n")
-        if t.get("result"):
-            print(f"result:\n{t['result']}\n")
-        for r in t["runs"]:
-            print(f"run {r['SK'][4:24]}  ok={r.get('ok')}  {r.get('duration_s')}s  turns={r.get('turns')}  "
-                  f"out_tokens={r.get('output_tokens')}  list-price ${r.get('cost_usd_list_price', 0):.2f}")
+    if not t:
+        print("no such sub-agent", file=sys.stderr)
+        return 1
+    t["runs"] = store.runs(a.id)
+    if a.json:
+        _out(t, True, "")
         return 0
-    if a.sub == "cancel":
-        ok = store.cancel(a.id)
-        print("cancelled" if ok else "not cancelled (already finished?)")
-        return 0 if ok else 1
-    if a.sub == "retry":
-        ok = store.retry(a.id)
-        print("re-queued" if ok else "not re-queued (still open?)")
-        return 0 if ok else 1
-    return 1
+    on = t.get("worker", "").split("@")[0] or t.get("to") or ""
+    print(f"{t['id']}  {t['status']}" + (f"  on {on}" if on else "") + f"  attempts {t.get('attempts', 0)}")
+    print(f"title:   {t['title']}")
+    for k in ("owner", "parent", "children", "branch"):
+        if t.get(k):
+            print(f"{k + ':':<9}{t[k]}")
+    print(f"\nprompt:\n{t['prompt']}\n")
+    print(f"result:\n{t['result']}\n" if t.get("result") else "result:  (not finished yet)\n")
+    for r in t["runs"]:
+        print(f"run {r['SK'][4:24]}  ok={r.get('ok')}  {r.get('duration_s')}s  turns={r.get('turns')}  "
+              f"out_tokens={r.get('output_tokens')}  list-price ${r.get('cost_usd_list_price', 0):.2f}")
+    return 0
 
 
-def _agents(store) -> dict[str, dict]:
-    """Every Claude on the farm that is up, by name (the part of a box id before '@'), from the heartbeats."""
-    out: dict[str, dict] = {}
-    for w in store.workers():
-        box, wid = w["SK"].rsplit("/", 1)
-        a = out.setdefault(box.split("@")[0], {"name": box.split("@")[0], "boxes": set(), "seat": w.get("seat"),
-                                                "workers": []})
-        a["boxes"].add(box)
-        a["workers"].append({"worker": wid, "state": w.get("state", ""), "task": w.get("task")})
-    return out
+def cmd_cancel(cfg, a):
+    ok = _store(cfg).cancel(a.id)
+    print("cancelled" if ok else "not cancelled (already finished?)")
+    return 0 if ok else 1
 
 
-def _agent_names(store) -> set[str]:
-    return set(_agents(store))
+def cmd_retry(cfg, a):
+    ok = _store(cfg).retry(a.id)
+    print("started again" if ok else "not restarted (still running?)")
+    return 0 if ok else 1
 
 
-def cmd_agents(cfg, a):
-    agents = _agents(_store(cfg))
-    rows = [{**x, "boxes": sorted(x["boxes"]), "me": x["name"] == cfg.name} for x in agents.values()]
-    lines = []
-    for r in sorted(rows, key=lambda r: (not r["me"], r["name"])):
-        busy = sum(w["state"] == "running" for w in r["workers"])
-        lines.append(f"  {r['name']:<20}{' (you)' if r['me'] else '      '}  {busy}/{len(r['workers'])} working"
-                     f"  seat {r['seat'] or '-'}  {', '.join(r['boxes'])}")
-    _out(rows, a.json, "CLAUDES on this farm (hand one a task: clodfarm task add \"...\" --prompt \"...\" --to NAME)\n"
-         + ("\n".join(lines) or "  (none up: is `clodfarm run` running?)"))
+def cmd_msg(cfg, a):
+    store = _store(cfg)
+    if a.to not in _names(cfg, store) and not a.force:
+        print(f"no Claude named '{a.to}' is on the farm ({', '.join(sorted(_names(cfg, store))) or 'none'}); "
+              "--force leaves it for when it joins", file=sys.stderr)
+        return 2
+    text = " ".join(a.text) if a.text != ["-"] else sys.stdin.read()
+    if not text.strip():
+        print("the message is empty", file=sys.stderr)
+        return 2
+    store.send_message(os.environ.get("FARM_OWNER") or cfg.name, a.to, text.strip())
+    print(f"sent to {a.to}; it reads it with `clodfarm inbox`")
+    return 0
+
+
+def cmd_inbox(cfg, a):
+    if a.hook:  # from the Claude Code hook: only in conversations with this Claude, never fail the prompt
+        if os.environ.get("FARM_TASK_ID"):
+            return 0
+        try:
+            msgs = _store(cfg).inbox(cfg.name)
+        except Exception:  # noqa: BLE001
+            return 0
+        if msgs:
+            print("New messages from other Claudes on this farm (reply with `clodfarm msg <name> \"...\"`):\n" + "\n".join(
+                f"- from {m['from']} at {iso(m['at'])[11:16]}Z: {m['text']}" for m in msgs))
+        return 0
+    msgs = _store(cfg).inbox(cfg.name, unread_only=not a.all, mark_read=not a.peek)
+    _out(msgs, a.json, "\n".join(f"  {iso(m['at'])[5:16].replace('T', ' ')}  from {m['from']}: {m['text']}" for m in msgs)
+         or "(no new messages)")
     return 0
 
 
@@ -302,19 +361,20 @@ def cmd_schedule(cfg, a):
         try:
             spec = {"cron": a.cron} if a.cron else {"every": parse_every(a.every)} if a.every else \
                 {"at": parse_at(a.at, a.tz)}
-            sch = store.add_schedule(a.title, _read_prompt(a), tz=a.tz, to=(a.to or None), priority=a.priority,
-                                     created_by=os.environ.get("FARM_TASK_ID") or "human", **spec)
+            sch = store.add_schedule(a.title, _read_prompt(a), tz=a.tz, to=(a.on or None),
+                                     created_by=os.environ.get("FARM_TASK_ID") or cfg.name,
+                                     owner=os.environ.get("FARM_OWNER") or cfg.name, **spec)
         except (ValueError, KeyError) as e:
             print(f"bad schedule: {e}", file=sys.stderr)
             return 2
         _out(sch, a.json, f"scheduled {sch['id']}: {sch['title']}  {describe(sch)}"
-             + (f" for {sch['to']}" if sch.get("to") else "") + f"; next run {_until(sch['next_at'])}")
+             + (f" on {sch['to']}" if sch.get("to") else "") + f"; next run {_until(sch['next_at'])}")
         return 0
     if a.sub == "list":
         rows = store.schedules()
         _out(rows, a.json, "\n".join(
             f"  {r['id']}  {describe(r):<32} next {_until(r['next_at']):<26} ran {r.get('runs', 0)}x  {r['title'][:60]}"
-            + (f"  (for {r['to']})" if r.get("to") else "") for r in rows) or "(no schedules)")
+            + (f"  (on {r['to']})" if r.get("to") else "") for r in rows) or "(no schedules)")
         return 0
     if a.sub == "remove":
         ok = store.remove_schedule(a.id)
@@ -342,24 +402,6 @@ def cmd_events(cfg, a):
     while a.follow:
         time.sleep(3)
         emit(store.events(now() - 120, 200))
-    return 0
-
-
-def cmd_mission(cfg, a):
-    from . import gitops
-    text = sys.stdin.read() if a.text == ["-"] else " ".join(a.text)
-    if a.file:
-        text = open(a.file).read()
-    if not text.strip():
-        cur = next((p for p in cfg.mission_paths if os.path.isfile(p)), None)
-        print(open(cur).read().rstrip() if cur else "No mission yet. Set one: clodfarm mission \"Build ...\"")
-        return 0 if cur else 1
-    if not os.path.isdir(cfg.repo_dir):
-        print(f"The workspace repo {cfg.repo_dir} doesn't exist yet: start the farm first (clodfarm run).", file=sys.stderr)
-        return 1
-    path = gitops.write_mission(cfg.repo_dir, text)
-    _store(cfg).event("mission.set", text.strip().splitlines()[0][:200])
-    print(f"mission saved to {path}. The planner picks it up when the queue is empty.")
     return 0
 
 
@@ -403,8 +445,6 @@ def cmd_doctor(cfg, a):
         check("farm store", False, f"{cfg.store}: {str(e)[:160]}")
     check("git", shutil.which("git"))
     check("workspace", os.path.isdir(cfg.workspace), cfg.workspace)
-    mission = next((p for p in cfg.mission_paths if os.path.isfile(p)), None)
-    check("MISSION.md", mission or not cfg.planner, mission or "missing: the planner has nothing to plan from")
     return 0 if ok else 1
 
 
@@ -457,28 +497,36 @@ def main(argv=None):
     add("login", cmd_login, "log in to your Claude subscription").add_argument("--force", action="store_true")
     add("logout", cmd_logout, "log out")
     add("whoami", cmd_whoami, "show the login in use")
-    add("status", cmd_status, "workers, queue and budget")
+    add("status", cmd_status, "the Claudes, their budget and the sub-agents at work")
     add("budget", cmd_budget, "subscription usage and governor decision").add_argument(
         "--refresh", action="store_true", help="run a tiny agent call to measure usage now")
-    t = add("task", cmd_task, "add, list, show, cancel or retry tasks")
-    ts = t.add_subparsers(dest="sub", required=True)
-    ta = ts.add_parser("add")
-    ta.add_argument("title")
-    ta.add_argument("--prompt", help="full instructions (default: the title); '-' reads stdin")
-    ta.add_argument("--prompt-file")
-    ta.add_argument("--parent", help="make it a sub-task of this task (use $FARM_TASK_ID)")
-    ta.add_argument("--priority", type=int, default=5, help="0-9, higher runs first")
-    ta.add_argument("--to", help="hand it to one Claude on the farm by name (see `clodfarm agents`)")
-    ta.add_argument("--force", action="store_true", help="with --to: queue it even if that Claude isn't up now")
-    tl = ts.add_parser("list")
-    tl.add_argument("--status", choices=["queued", "running", "waiting", "done", "failed", "cancelled"])
-    tl.add_argument("--limit", type=int, default=50)
-    for name in ("show", "cancel", "retry"):
-        ts.add_parser(name).add_argument("id")
-    for q in (ta, tl, *[ts.choices[n] for n in ("show", "cancel", "retry")]):
-        q.add_argument("--json", action="store_true")
-    add("agents", cmd_agents, "the Claudes on this farm")
-    sc = add("schedule", cmd_schedule, "run a task on a schedule")
+    sw = add("spawn", cmd_spawn, "start a sub-agent (any Claude with budget runs it, or --on NAME)")
+    sw.add_argument("title")
+    sw.add_argument("--prompt", help="full, self-contained instructions (default: the title); '-' reads stdin")
+    sw.add_argument("--prompt-file")
+    sw.add_argument("--on", help="run it on this Claude's account (see `clodfarm agents`); default: whoever has budget")
+    sw.add_argument("--force", action="store_true", help="with --on: wait for that Claude even if it isn't up now")
+    sw.add_argument("--parent", help="make it the sub-agent of this one (default inside a sub-agent: $FARM_TASK_ID)")
+    sw.add_argument("--detach", action="store_true", help="inside a sub-agent: start it on its own, not as your child")
+    sl = add("subagents", cmd_subagents, "the sub-agents running and waiting")
+    sl.add_argument("--all", action="store_true", help="also the recently finished ones")
+    sl.add_argument("--mine", action="store_true", help="only the ones this Claude started")
+    rs = add("result", cmd_result, "a sub-agent's status and result")
+    rs.add_argument("id")
+    rs.add_argument("--wait", action="store_true", help="wait until it finishes")
+    rs.add_argument("--timeout", type=int, default=1800, help="with --wait: give up after this many seconds")
+    add("cancel", cmd_cancel, "stop a sub-agent").add_argument("id")
+    add("retry", cmd_retry, "start a failed or cancelled sub-agent again").add_argument("id")
+    ms = add("msg", cmd_msg, "send a message to another Claude on the farm")
+    ms.add_argument("to")
+    ms.add_argument("text", nargs="+", help="the message ('-' reads stdin)")
+    ms.add_argument("--force", action="store_true", help="leave it even if that Claude isn't up now")
+    ib = add("inbox", cmd_inbox, "messages other Claudes sent you")
+    ib.add_argument("--all", action="store_true", help="also the ones already read")
+    ib.add_argument("--peek", action="store_true", help="don't mark them read")
+    ib.add_argument("--hook", action="store_true", help=argparse.SUPPRESS)
+    add("agents", cmd_agents, "the Claudes on this farm and the budget each has left")
+    sc = add("schedule", cmd_schedule, "start a sub-agent on a schedule")
     scs = sc.add_subparsers(dest="sub", required=True)
     sa = scs.add_parser("add")
     sa.add_argument("title")
@@ -489,8 +537,7 @@ def main(argv=None):
     when.add_argument("--every", help="an interval: 30m, 2h, 1d, 1w")
     when.add_argument("--at", help="once: 2026-10-01T09:00 (in --tz), or 'in 3h'")
     sa.add_argument("--tz", default=os.environ.get("FARM_TZ") or "UTC", help="time zone for --cron/--at (default FARM_TZ or UTC)")
-    sa.add_argument("--to", help="hand each run to one Claude on the farm by name")
-    sa.add_argument("--priority", type=int, default=5)
+    sa.add_argument("--on", help="run it on this Claude's account; default: whoever has budget")
     scs.add_parser("list")
     scs.add_parser("remove").add_argument("id")
     for q in scs.choices.values():
@@ -498,9 +545,6 @@ def main(argv=None):
     e = add("events", cmd_events, "the event log")
     e.add_argument("-n", type=int, default=30)
     e.add_argument("-f", "--follow", action="store_true")
-    m = add("mission", cmd_mission, "show or set MISSION.md, what the planner keeps the agents busy with")
-    m.add_argument("text", nargs="*", help="the mission ('-' reads stdin); empty shows the current one")
-    m.add_argument("-f", "--file", help="read the mission from a file")
     add("pause", cmd_pause, "pause new work everywhere").add_argument("reason", nargs="*")
     add("resume", cmd_resume, "resume work")
     add("ui", cmd_ui, "serve the farm UI (the daemon also serves it unless FARM_UI=0)")

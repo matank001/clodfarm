@@ -1,12 +1,13 @@
-"""The farm daemon: keeps Remote Control up and the workers busy.
+"""The farm daemon: keeps this Claude reachable from the Claude app and runs the farm's sub-agents.
 
     clodfarm run
 
 Threads:
-  * remote-control keeper  ``claude remote-control`` so you can drive the box
-                           from the Claude app or claude.ai/code; restarted if it exits
-  * worker 0..N-1          take a budget slot, claim a task, run a headless agent
-  * main loop              reaps dead leases, heartbeats, prints a status line
+  * remote-control keeper  ``claude remote-control``, so you talk to this Claude from the Claude app or
+                           claude.ai/code; restarted if it exits
+  * runner 0..N-1          take a budget slot, take the next sub-agent this account may run, run it headless
+  * usage keeper           measures the account's real usage right after login and whenever no run has for a while
+  * main loop              starts scheduled sub-agents, reaps dead leases, prints a status line
 """
 
 from __future__ import annotations
@@ -21,7 +22,7 @@ import threading
 import time
 
 from . import gitops, notify, prompts
-from .auth import accept_remote_control, auth_status, banner, install_guide, seat_id, trust_directory
+from .auth import accept_remote_control, auth_status, banner, install_guide, install_hooks, seat_id, trust_directory
 from .config import Config, load
 from .governor import Snapshot, decide
 from .runner import build_cmd, run_agent
@@ -38,7 +39,6 @@ class Farm:
         store.echo = True
         self.stop = threading.Event()
         self.procs: dict[str, subprocess.Popen] = {}
-        self.no_mission_logged = False
         self.ui = None
 
     # ------------------------------------------------------------ lifecycle
@@ -56,13 +56,11 @@ class Farm:
         self.wait_for_auth()
         self.ensure_table()
         gitops.ensure_repo(self.cfg.repo_dir, self.cfg.repo_url)
-        if os.environ.get("FARM_MISSION") and not any(os.path.isfile(p) for p in self.cfg.mission_paths):
-            gitops.write_mission(self.cfg.repo_dir, os.environ["FARM_MISSION"])
-            self.store.event("mission.set", "MISSION.md written from FARM_MISSION")
         if self.cfg.manage_claude_config:
             if self.cfg.remote_control:
                 accept_remote_control()
             install_guide()
+            install_hooks()
             trust_directory(self.cfg.repo_dir)
             trust_directory(self.cfg.workspace)
         self.store.event("farm.started", f"{self.cfg.farm_id}: {self.cfg.policy.max_workers} workers, "
@@ -71,6 +69,8 @@ class Farm:
         threads = []
         if self.cfg.remote_control:
             threads.append(threading.Thread(target=self.remote_control_loop, name="remote-control", daemon=True))
+        if self.cfg.usage_refresh > 0:
+            threads.append(threading.Thread(target=self.usage_loop, name="usage", daemon=True))
         for i in range(self.cfg.policy.max_workers):
             threads.append(threading.Thread(target=self.worker_loop, args=(i,), name=f"w{i}", daemon=True))
         for t in threads:
@@ -184,6 +184,37 @@ class Farm:
             self.store.event("rc.exited", f"code {p.returncode} after {ran:.0f}s; restarting in {backoff}s")
             self.stop.wait(backoff)
 
+    # ----------------------------------------------------------------- usage
+    def usage_loop(self):
+        """Keep this account's 5-hour and 7-day usage fresh, so a new Claude shows its real budget within seconds and
+        an idle one stays current. Every sub-agent run reports usage live; when none has for ``usage_refresh`` seconds,
+        a one-word call asks Claude Code for a fresh report (it counts as a tiny bit of usage)."""
+        while not self.stop.is_set():
+            try:
+                snap = self.store.get_snapshot(self.seat)
+                stale = not snap or now() - snap.observed_at > self.cfg.usage_refresh
+                if stale and set(self.procs) <= {"remote-control"} and not self.cfg.policy.api_mode:
+                    self.measure_usage()
+            except Exception as e:  # noqa: BLE001 - measuring must never take the farm down
+                print(f"usage: {e!r}", flush=True)
+            self.stop.wait(30)
+
+    def measure_usage(self) -> bool:
+        env = {**os.environ, "FARM_TASK_ID": "usage", "FARM_WORKER_ID": f"{self.cfg.farm_id}/usage"}
+        try:
+            res = run_agent(build_cmd(self.cfg, "Answer in one word."), "Reply with: ok", self.cfg.workspace, env, 180,
+                            on_snapshot=lambda sn: self.store.put_snapshot(sn, self.seat),
+                            on_start=lambda p: self.procs.__setitem__("usage", p))
+        finally:
+            self.procs.pop("usage", None)
+        self.store.add_spend(res.cost_usd, self.seat)
+        if not res.snapshots:
+            return False
+        sn = res.snapshots[-1]
+        pct = lambda w: "?" if not w else f"{w.utilization:.0%}"  # noqa: E731
+        self.store.event("usage.measured", f"{self.cfg.name}: 5h {pct(sn.five_hour)} used, 7d {pct(sn.seven_day)} used")
+        return True
+
     # --------------------------------------------------------------- workers
     def worker_loop(self, i: int):
         wid = f"w{i}"
@@ -215,7 +246,6 @@ class Farm:
         try:
             task = store.claim_next(holder, cfg.lease_seconds, cfg.farm_id, cfg.resume_affinity, agent=cfg.name)
             if not task:
-                self.maybe_plan()
                 store.heartbeat(cfg.farm_id, wid, "idle", seat=self.seat)
                 store.release_slot(slot, holder)
                 slot = None
@@ -230,22 +260,6 @@ class Farm:
             if slot is not None:
                 store.release_slot(slot, holder)
 
-    def maybe_plan(self):
-        cfg, store = self.cfg, self.store
-        if not cfg.planner or store.count("queued") > 0:
-            return
-        mission = next((open(p).read() for p in cfg.mission_paths if os.path.isfile(p)), None)
-        if not mission:
-            if not self.no_mission_logged:
-                store.event("planner.no_mission", prompts.NO_MISSION)
-                self.no_mission_logged = True
-            return
-        if any(t.get("kind") == "plan" for s in ("running", "waiting") for t in store.list_tasks(s)):
-            return
-        if store.planner_try_start(cfg.planner_cooldown):
-            store.add_task("Plan the next tasks", "(planner: prompt is built at run time)", priority=9,
-                           kind="plan", created_by="planner", max_depth=cfg.max_depth)
-
     def run_task(self, task: dict, wid: str, holder: str, slot: int):
         cfg, store = self.cfg, self.store
         tid = task["id"]
@@ -253,8 +267,8 @@ class Farm:
         use_git = gitops.is_repo(cfg.repo_dir)
         branch = None
         parent_branch = f"farm/{task['parent']}" if task.get("parent") else None
-        if use_git and task.get("kind") != "plan":
-            # a sub-task starts from its parent's branch, so it sees the parent's committed work
+        if use_git:
+            # a sub-agent starts from its parent's branch, so it sees the parent's committed work
             cwd, branch = gitops.worktree_for(cfg.repo_dir, tid, parent_branch)
         else:
             cwd = cfg.repo_dir if use_git else cfg.workspace
@@ -263,12 +277,7 @@ class Farm:
 
         resume = bool(task.get("resume"))
         session = task.get("session_id") if resume else None
-        if task.get("kind") == "plan":
-            mission = next((open(p).read() for p in cfg.mission_paths if os.path.isfile(p)), "")
-            recent = [t for t in store.list_tasks("done", 15) + store.list_tasks("failed", 5) if t["id"] != tid]
-            queue = store.list_tasks("queued") + store.list_tasks("running") + store.list_tasks("waiting")
-            prompt = prompts.planner_prompt(cfg, mission, recent, [t for t in queue if t["id"] != tid])
-        elif resume:
+        if resume:
             reason = task.get("resume_reason")
             if reason == "verify":
                 prompt = prompts.verify_prompt(cfg.verify_cmd, task.get("resume_note") or "")
@@ -289,7 +298,8 @@ class Farm:
         if resume:
             store.mark_resumed(tid)
 
-        env = {**os.environ, "FARM_TASK_ID": tid, "FARM_WORKER_ID": f"{cfg.farm_id}/{wid}"}
+        env = {**os.environ, "FARM_TASK_ID": tid, "FARM_WORKER_ID": f"{cfg.farm_id}/{wid}",
+               "FARM_OWNER": task.get("owner") or cfg.name}  # its own sub-agents and messages speak for its Claude
         sysprompt = prompts.task_system_prompt(cfg, task, cwd, branch)
 
         keep = threading.Event()
@@ -376,17 +386,11 @@ class Farm:
         if cfg.stall_threshold and failures >= cfg.stall_threshold and not store.control().get("paused"):
             reason = f"circuit breaker: {failures} failed runs in a row (last: {tid} {task['title'][:60]})"
             store.set_paused(True, reason, by="farm")
-            self.notify("paused by circuit breaker", reason + ". Look at `clodfarm events` and `clodfarm task show "
+            self.notify("paused by circuit breaker", reason + ". Look at `clodfarm events` and `clodfarm result "
                         f"{tid}`, fix the cause, then run `clodfarm resume`.")
         if final == "done" and branch:
-            # a sub-task's branch stays until its parent has merged it
+            # a sub-agent's branch stays until its parent has merged it
             gitops.remove_worktree(cfg.repo_dir, cwd, None if task.get("parent") else branch)
-        if task.get("kind") == "plan":
-            spawned = int((store.get_task(tid) or {}).get("spawned", 0))
-            store.planner_backoff(spawned, cfg.planner_cooldown, cfg.planner_max_backoff)
-            if not spawned and int(store.planner_state().get("idle_runs", 0)) == 1:
-                self.notify("nothing left to do", "The planner found nothing useful to queue from MISSION.md: "
-                            + res.text[-500:])
 
     def notify(self, title: str, text: str):
         notify.send(self.cfg.notify_url, title, text, self.cfg.name)
@@ -411,8 +415,8 @@ class Farm:
             if more_to_do:
                 gitops.commit_leftovers(cwd, branch)
                 if cfg.push:
-                    gitops.push_branch(cfg.repo_dir, branch)  # sub-tasks on other boxes branch from it
-                return f"work kept on {branch}; sub-tasks branch from it and you merge them when resumed", "kept"
+                    gitops.push_branch(cfg.repo_dir, branch)  # sub-agents on other boxes branch from it
+                return f"work kept on {branch}; sub-agents branch from it and you merge them when resumed", "kept"
             if parent_branch:
                 gitops.commit_leftovers(cwd, branch)
                 n = gitops.ahead_of(cfg.repo_dir, branch, parent_branch)

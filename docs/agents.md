@@ -1,51 +1,34 @@
-# What the agents know (and how to steer them)
+# What the Claudes know (and how to steer them)
 
-Every headless agent gets the **farm guide** appended to its system prompt (`--append-system-prompt`, text in
-`clodfarm/prompts.py`), plus a line naming its task id, depth and worktree. The same guide is written into the
-user-level `CLAUDE.md` in the container (between `clodfarm:guide` markers), so sessions you open through Remote
-Control know the farm too and can queue work for it.
+Every Claude on the farm reads the **farm guide** (text in `clodfarm/prompts.py`): it is written into each Claude's
+user-level `CLAUDE.md` (between `clodfarm:guide` markers), so the conversations you open through Remote Control know
+the farm, and every sub-agent gets it appended to its system prompt plus a line naming its id, depth and worktree.
 
 The guide teaches them to:
-- **Split big work:** `clodfarm task add "<title>" --prompt "<self-contained instructions>" --parent $FARM_TASK_ID`,
-  then end the run. They're resumed in the same session with the results. They never sleep or poll.
-- **Use built-in sub-agents** (Claude Code's Agent tool) for small parallel look-ups inside one run.
-- **Commit on their branch** and not push or merge. The farm does that.
-- **Hand work to another Claude** on the farm: `clodfarm agents`, then `clodfarm task add ... --to <name>`.
+- **Know their budget:** `clodfarm agents` shows every Claude's 5-hour and 7-day budget left and how many more
+  sub-agents it can start. The governor paces each account; they don't try to get around limits.
+- **Save budget:** a sub-agent without `--on` runs on whichever Claude has room, so a Claude that is running low
+  hands big jobs to sub-agents instead of doing them in its conversation.
+- **Start sub-agents you can see:** `clodfarm spawn "<title>" --prompt "<self-contained instructions>" [--on NAME]`,
+  then `clodfarm subagents` / `clodfarm result <id> [--wait]`. Inside a sub-agent, new sub-agents become its
+  children; it ends its run and is resumed in the same session with their results. It never sleeps or polls.
+- **Use Claude Code's Agent tool** only for quick look-ups (it isn't visible on the farm or paced).
+- **Work with the other Claudes:** `clodfarm msg <name> "..."` (it appears in that Claude's next turn through a
+  Claude Code hook; `clodfarm inbox` lists them), to hand off a mission, ask for a review or avoid collisions.
 - **Schedule work:** `clodfarm schedule add "<title>" --prompt "..." --cron "0 9 * * 1-5" --tz <zone>` (or
   `--every 2h`, `--at "in 3h"`); `clodfarm schedule list` / `remove <id>`.
-- **End with a plain summary.** That's what the person, the parent task or the planner reads.
-- **Check `clodfarm budget`** before queueing a large batch. They leave pacing to the governor instead of
-  rationing themselves.
-- **Stay safe:** never touch credentials; no messages, payments, account creation or public posts unless the
-  mission says so.
-
-## MISSION.md (optional planner)
-
-The planner is off by default: you talk to your Claude instead. Turn it on with `FARM_PLANNER=1` and put a `MISSION.md` at the root of the work repo (or at `/workspace/MISSION.md`). When the queue is empty and there's
-budget, **one** planner run (single-flight across all boxes, at most once per `FARM_PLANNER_COOLDOWN`) reads:
-- the mission;
-- the last 15 finished and 5 failed tasks with their results;
-- everything still open.
-
-It then queues 1 to `max_queue/3` concrete tasks. If there's nothing useful to do, it says `IDLE:` and queues
-nothing, and the planner backs off exponentially (up to `FARM_PLANNER_MAX_BACKOFF`, 6 h). Any new task you add
-resets the cycle.
-
-A good mission has:
-- **the outcome**, not the steps ("a CLI that ..., with tests and docs");
-- **the constraints** (language, style, what never to touch, what "done" means);
-- **how to check the work** (test command, lint, a script);
-- **when to stop** ("stop once X ships", or "keep improving Y").
-
-See [examples/MISSION.md](../examples/MISSION.md).
+- **Commit on their branch** (sub-agents) and not push or merge. The farm does that.
+- **End with a plain summary.** That is the sub-agent's result.
+- **Stay safe:** never touch credentials; no messages outside the farm, payments, account creation or public posts
+  unless the person they work for asks.
 
 ## Limits that keep a swarm sane
 
 | Setting | Default | Why |
 |---|---|---|
-| `FARM_MAX_DEPTH` | 3 | sub-task nesting |
-| `FARM_MAX_QUEUE` | 25 | agents can't queue past this (humans can) |
-| `FARM_MAX_ATTEMPTS` | 3 | per task, rate-limit retries excluded |
+| `FARM_MAX_DEPTH` | 3 | sub-agent nesting |
+| `FARM_MAX_QUEUE` | 25 | sub-agents can't start more once this many are waiting (you and your Claude can) |
+| `FARM_MAX_ATTEMPTS` | 3 | per sub-agent, rate-limit retries excluded |
 | `FARM_MAX_RESUMES` | 5 | a parent re-runs at most this often for late children |
 | `FARM_TASK_TIMEOUT` | 5400 s | one agent run |
 

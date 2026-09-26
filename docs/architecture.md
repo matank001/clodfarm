@@ -25,9 +25,9 @@ container (user "farm", tini as PID 1)
 | `store.py` | Tasks, runs, per-seat budget, slots, control switches, heartbeats, events: every state change is a versioned conditional update. |
 | `backends.py` | The two stores behind it: SQLite (WAL, safe across threads and `docker exec` processes) and DynamoDB. |
 | `runner.py` | Starts one `claude -p` process, streams its JSON events, collects the result, usage and `rate_limit_event`s, and enforces a timeout. |
-| `supervisor.py` | The worker loop, the planner trigger, resume logic, git integration, the Remote Control keeper. |
+| `supervisor.py` | The sub-agent runners, the usage keeper, schedules, resume logic, git integration, the Remote Control keeper. |
 | `gitops.py` | One worktree and branch per task; rebase onto main plus fast-forward; conflicts become tasks. |
-| `prompts.py` | The farm guide every agent gets, the planner prompt and the resume prompt. |
+| `prompts.py` | The farm guide every Claude gets, and the resume prompts. |
 | `auth.py` | Login detection, the waiting banner, onboarding and trust flags, the guide in `CLAUDE.md`. |
 | `cli.py` | The `clodfarm` command, shared by humans and agents. |
 
@@ -40,18 +40,19 @@ container (user "farm", tini as PID 1)
 | `BUDGET` | `<seat>` | Newest `rate_limit_event` snapshot of that Claude account. The write is conditional on `observed_at` being newer. |
 | `SLOT` | `<seat>#000..` | Per-seat concurrency slots with leases, shared by every box on that seat. |
 | `SPEND` | `<seat>#<day>` | API-mode list-price spend per seat and day. |
-| `CONTROL` | `GLOBAL` / `PLANNER` | The pause switch; planner single-flight and back-off. |
+| `CONTROL` | `GLOBAL` / `HEALTH` | The pause switch; the circuit breaker's failure count. |
+| `MSG#<claude>` | `<ts>#<rand>` | A message to one Claude (its inbox; TTL 30 days). |
 | `SCHEDULE` | `<id>` | A scheduled task (cron + time zone, every N seconds, or once at a time) and its next run. |
 | `WORKER` | `<farm>/<worker>` | Heartbeats (TTL 1 day). |
 | `EVENT#<day>` | `<ts>#<rand>` | Event log (TTL 30 days). |
 
-Task IDs start with a timestamp, so they sort by creation time.
+Sub-agent IDs start with a timestamp, so they sort by creation time.
 
-## Task lifecycle
+## Sub-agent lifecycle
 
 ```mermaid
 stateDiagram-v2
-  [*] --> queued: task add
+  [*] --> queued: clodfarm spawn
   queued --> running: claim (conditional on status=queued) + lease
   running --> done: success, no open children
   running --> waiting: success, has open children
@@ -74,18 +75,17 @@ depth is bounded by `FARM_MAX_DEPTH` (3).
 
 ## Git flow
 
-- Each task gets `/workspace/.worktrees/<id>` on branch `farm/<id>`, cut from `main`. If the repo has an
+- Each sub-agent gets `/workspace/.worktrees/<id>` on branch `farm/<id>`, cut from `main`. If the repo has an
   `origin`, `main` is pulled first.
 - On success, anything left uncommitted is committed for the agent. The branch is rebased onto `main`, and `main`
   is fast-forwarded to it (under a lock, one merge at a time per box), then pushed if `origin` exists and
   `FARM_PUSH=1`.
-- A rebase conflict aborts the rebase and queues a priority-8 "resolve merge conflict" task.
-- Planner runs happen in the main checkout and are told not to change anything.
+- A rebase conflict aborts the rebase and starts a "resolve merge conflict" sub-agent.
 - Remote Control sessions spawned from the app use `--spawn worktree` too. The one Remote Control session
   pre-created in `/workspace/repo` sits on the main checkout, so commit there with care: the farm fast-forwards
   `main` underneath it.
 
-Without a git repo in `/workspace/repo`, tasks run in `/workspace` with no isolation. The farm creates an empty repo
+Without a git repo in `/workspace/repo`, sub-agents run in `/workspace` with no isolation. The farm creates an empty repo
 on first start, so that only happens if you remove it.
 
 ## Failure handling
@@ -105,7 +105,7 @@ on first start, so that only happens if you remove it.
 ## Scaling out
 
 Run the same image on more boxes with the same `FARM_TABLE` (real DynamoDB) and the same `FARM_REPO_URL`:
-- **Shared:** they share the queue, and task branches travel through origin.
+- **Shared:** they are one farm, and sub-agent branches travel through origin.
 - **Per seat:** each box works out its seat from its login. The budget, slots and spend are per seat, and the
   governor caps each seat's concurrency across all of that seat's boxes.
 - **Per box:** `FARM_MAX_WORKERS` is per box.
@@ -117,5 +117,5 @@ See [multi-seat.md](multi-seat.md).
 
 - No web UI. The Claude app (Remote Control), the CLI and `docker logs` cover it.
 - No multi-account pooling, no API-key fallback and no limit evasion.
-- No outbound messages, payments or posting. Agents are told not to unless your mission says so, and nothing in
+- No outbound messages, payments or posting. Claudes are told not to unless the person they work for asks, and nothing in
   clodfarm itself does any of it.

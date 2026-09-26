@@ -35,7 +35,7 @@ see a URL: open it on any device, approve, and paste the code back. See [auth.md
 Day to day:
 ```bash
 deploy/aws/deploy.sh logs     # follow the container logs
-deploy/aws/deploy.sh shell    # a shell inside the container (clodfarm task add ..., git log, ...)
+deploy/aws/deploy.sh shell    # a shell inside the container (clodfarm spawn ..., git log, ...)
 deploy/aws/deploy.sh down     # delete everything except the DynamoDB table
 ```
 

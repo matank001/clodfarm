@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/farm.png" alt="The clodfarm UI: a pixel-art farm where every Claude Code agent is a little Claude character. Some work at terminals beside crop plots, mini Claudes help as sub-agents, finished quests bloom, and a few nap by the barn while the budget governor paces them" width="100%">
+  <img src="assets/farm.png" alt="The clodfarm UI: a pixel-art farm where every Claude Code agent is a little Claude character. Some work at terminals beside crop plots, mini Claudes help as sub-agents, finished work blooms, and a Claude naps by the barn while its budget governor paces it" width="100%">
 </p>
 
 <p align="center">
@@ -23,23 +23,22 @@
 
 **clodfarm** (say it out loud) is a farm of Claude Code agents running around the clock in a container. A clod
 is a lump of soil, and this is where your agents grow.
-- **You steer it from the Claude app on your phone.**
-- **Agents split big jobs into parallel sub-agents.**
-- **A budget governor paces everything on your account's real 5-hour and weekly usage.**
-
-Add more boxes, or your teammates' own accounts, and they share one queue while each account keeps its own budget.
+- **You talk to your Claude from the Claude app on your phone.** It does the work, or starts sub-agents for it.
+- **You see every sub-agent** on the farm: mini Claudes working at the plot of the Claude that started them.
+- **Claudes work together:** each one is a person's own account. They message each other and run sub-agents on
+  whichever account has budget left.
+- **Every account is paced on its real 5-hour and weekly usage**, measured the moment it joins and kept current.
 
 <p align="center">
-  <img src="assets/status.svg" alt="Terminal output of clodfarm status: two Claude accounts with their own usage bars and governor decisions, Remote Control live, and the shared task queue" width="92%">
-  <br><sub><i>One farm, two seats. Gil's seat is near its 5-hour ceiling and paused; the work flows to Matan's seat. (Illustrative output.)</i></sub>
+  <img src="assets/architecture.png" alt="How clodfarm works, drawn as the farm: on your phone you ask your Claude (matan) for work over Remote Control; it works at a plot with three mini-Claude sub-agents, one running on gil's account; gil works at the next plot; noa naps because its budget is paced; the barn is the shared store and git repo and the board runs schedules" width="100%">
 </p>
 
 <table>
 <tr>
 <td width="25%" valign="top"><b>01 · Install</b><br>One line on any box with Docker, or one command on AWS with no open ports.</td>
-<td width="25%" valign="top"><b>02 · Log in from anywhere</b><br><code>clodfarm login</code> prints a URL. Approve it on your phone and paste the code.</td>
-<td width="25%" valign="top"><b>03 · Talk to it from your phone</b><br>Open the Claude app → Code → your farm and ask. It does the work, or starts sub-workers.</td>
-<td width="25%" valign="top"><b>04 · It keeps going</b><br>It hands work to your teammates' Claudes, runs scheduled tasks, tests and merges, paced on your real limits.</td>
+<td width="25%" valign="top"><b>02 · Add your Claudes</b><br>Tap the egg in the farm UI and log in. Teammates add theirs the same way.</td>
+<td width="25%" valign="top"><b>03 · Talk to yours</b><br>Claude app → Code → your farm. Ask for anything, from anywhere.</td>
+<td width="25%" valign="top"><b>04 · Watch it grow</b><br>Sub-agents, messages between Claudes and schedules, all on the farm, paced on real usage.</td>
 </tr>
 </table>
 
@@ -51,20 +50,20 @@ operations layer:
 
 | | |
 |---|---|
-| 🌙 **Always on** | Workers restart, leases expire, crashed runs are retried, and timed-out runs continue in their own session. |
-| 📱 **Steer it from your phone** | `claude remote-control` stays up, so the farm is a session in the Claude app and at claude.ai/code. |
-| 🌱 **Sub-agents that merge** | `clodfarm task add --parent $FARM_TASK_ID` fans out. Each child works in its own git worktree, and the parent is resumed *in its own session* to merge the results. |
+| 🌙 **Always on** | Claudes restart, leases expire, crashed sub-agents are retried, and timed-out ones continue in their own session. |
+| 📱 **Talk to it from your phone** | Every Claude keeps `claude remote-control` up, so it is a session in its person's Claude app and at claude.ai/code. |
+| 🌱 **Sub-agents you can see** | `clodfarm spawn` starts one: a mini Claude on the farm, in its own git worktree. A sub-agent's own sub-agents are its children, and it is resumed *in its own session* to merge their work. |
 | 🌕 **Paced on real usage** | Every run reports the account's actual 5-hour and weekly utilization (`rate_limit_event`). The governor paces the week, leaves you 20% by default, sleeps through rejections, and never touches paid overage. |
-| 👥 **Many boxes, many seats** | Point containers on several accounts at one table: one queue, one repo, a separate budget per account. |
+| 👥 **Many boxes, many seats** | Point containers on several accounts at one table: one farm, one repo, a separate budget per account. |
 | ✅ **Nothing lands untested** | `FARM_VERIFY_CMD` runs your tests on the rebased branch, and a failing check sends the agent back to fix it. |
-| 🤝 **Claudes that work together** | Your Claude hands a job to a teammate's Claude on the same farm: `clodfarm task add ... --to gil`. Only Gil's Claude takes it, on Gil's budget. |
-| ⏰ **Scheduled tasks** | "Every weekday at 9, summarize the open PRs": `clodfarm schedule add ... --cron "0 9 * * 1-5" --tz Asia/Jerusalem`, or `--every 2h`, or `--at "in 3h"`. |
-| 🔔 **Tells you when it matters** | Notifications to ntfy, Slack or Discord for failures, a tripped circuit breaker, usage limits, and "nothing left to do". |
+| 🤝 **Claudes that work together** | `clodfarm agents` shows every Claude and the budget it has left. A sub-agent without `--on` runs on whichever account has room, `--on gil` picks one, and `clodfarm msg gil "..."` lands in Gil's next turn. |
+| ⏰ **Schedules** | "Every weekday at 9, summarize the open PRs": `clodfarm schedule add ... --cron "0 9 * * 1-5" --tz Asia/Jerusalem`, or `--every 2h`, or `--at "in 3h"`. |
+| 🔔 **Tells you when it matters** | Notifications to ntfy, Slack or Discord for failures, a tripped circuit breaker and usage limits. |
+| 📈 **Usage in real time** | A new Claude's usage is measured the moment it logs in; every run reports it live, and an idle Claude is re-measured every 5 minutes (`FARM_USAGE_REFRESH`). |
+| 🕹️ **A farm you can watch** | Open `http://localhost:8080`: one pixel Claude per account, its sub-agents around its plot, napping when its budget says so. Tap a Claude for its budget, its sub-agents and a link to talk to it in the Claude app; hatch new Claudes (each its own login) from the browser. |
 
-| 🕹️ **A farm you can watch** | Open `http://localhost:8080`: every agent is a pixel Claude walking the farm, tending its task at a terminal or napping when the budget says so. Tap a Claude for its budget and a link to talk to it in the Claude app, and hatch new agents (each one its own Claude login) from the browser. |
-
-You talk to your Claude in the Claude app; the farm UI shows who is working on what; the CLI and the logs drive the
-same queue.
+You talk to your Claude in the Claude app; the farm UI shows who is working on what; the Claudes and you use the
+same CLI.
 
 ## Quick start
 
@@ -80,7 +79,7 @@ device, then paste the code back. Then open **Claude app → Code → clodfarm**
 Or from a shell:
 
 ```bash
-docker exec clodfarm clodfarm task add "Add CSV export" --prompt "Add CSV export to the report page, with tests."
+docker exec clodfarm clodfarm spawn "Add CSV export" --prompt "Add CSV export to the report page, with tests."
 docker exec clodfarm clodfarm status
 ```
 
@@ -104,15 +103,14 @@ Either way the farm's state lives in a SQLite file inside the workspace volume, 
 
 > [!TIP]
 > Point it at a real repo with `FARM_REPO_URL` (plus a deploy key) and set `FARM_VERIFY_CMD="pytest -q"`. The farm
-> clones the repo and pushes `main` only when your tests pass. Want it to keep itself busy? `FARM_PLANNER=1` plus a
-> `MISSION.md` turns on the planner, which queues the next tasks whenever the queue runs dry.
+> clones the repo, and every sub-agent's work lands on `main` only when your tests pass.
 
 ## Deploy
 
 | | What you get |
 |---|---|
 | [**Single deployment**](#single-deployment) | One box, one Claude account. Everything in one container. |
-| [**Multiple deployments, one farm**](#multiple-deployments-one-farm) | Several boxes on your account or teammates' own accounts: one queue and one repo, each account paced on its own budget. |
+| [**Multiple deployments, one farm**](#multiple-deployments-one-farm) | Several boxes on your account or teammates' own accounts: one farm and one repo, each account paced on its own budget. |
 
 You can start single and add boxes later. A new box simply joins the first one's table.
 
@@ -137,13 +135,13 @@ Remote Control, the Claude API and SSM all use outbound HTTPS only. See [docs/de
 
 A single box keeps its farm in a local SQLite file. To spread one farm over several boxes, the boxes share a
 **DynamoDB table** instead (`FARM_STORE=dynamodb`; the AWS deploy sets it for you).
-- **Shared:** every box pointed at that table shares **one queue** and **one git repo**.
+- **Shared:** every box pointed at that table is **one farm** (sub-agents, messages, schedules) with **one git repo**.
 - **Per account:** each box is paced on the budget of the Claude account it's logged in to (its **seat**). When one
   seat hits a limit, only its boxes pause.
 
 **You need:**
 - real DynamoDB (the AWS deploy creates it);
-- a shared git repo every box can push to (`--workspace-repo` / `FARM_REPO_URL`); task branches travel through it.
+- a shared git repo every box can push to (`--workspace-repo` / `FARM_REPO_URL`); sub-agent branches travel through it.
 
 ```bash
 # box 1 creates the farm (table "clodfarm")
@@ -160,11 +158,11 @@ STACK=farm-gil deploy/aws/deploy.sh login
 clodfarm budget   # every seat: usage bars, its boxes, what it may run right now
 ```
 
-- A sub-task can run on Gil's box and be merged by its parent on yours.
+- A sub-agent can run on Gil's box and be merged by its parent on yours.
 - A resumed parent waits a few minutes for the box that holds its conversation.
 
 <details>
-<summary><b>Join from any Docker host, or add work from your laptop</b></summary>
+<summary><b>Join from any Docker host, or start sub-agents from your laptop</b></summary>
 
 **A Docker host joining an existing farm:**
 1. In `.env`, set `FARM_STORE=dynamodb`, `FARM_TABLE=<table>`, `AWS_REGION=<region>` and
@@ -172,12 +170,12 @@ clodfarm budget   # every seat: usage bars, its boxes, what it may run right now
 2. Give the box AWS credentials for the table.
 3. Run `docker compose up -d && docker exec -it clodfarm clodfarm login`.
 
-**Queue work from your laptop without running a worker:**
+**Start a sub-agent from your laptop without running a box:**
 
 ```bash
 pip install git+https://github.com/matank001/clodfarm
 export FARM_STORE=dynamodb FARM_TABLE=clodfarm AWS_REGION=<region>   # plus AWS credentials for the table
-clodfarm task add "Refactor the parser" --prompt "..." && clodfarm status
+clodfarm spawn "Refactor the parser" --prompt "..." && clodfarm status
 ```
 </details>
 
@@ -185,51 +183,25 @@ Full guide: [docs/multi-seat.md](docs/multi-seat.md).
 
 ## How it works
 
-```mermaid
-flowchart LR
-  subgraph you[You]
-    app[Claude app<br/>claude.ai/code]
-    cli[clodfarm CLI]
-  end
-  subgraph box[Each box: clodfarm run]
-    rc[Remote Control keeper]
-    w[Workers<br/>claude -p, one worktree each]
-    sched[Schedules<br/>cron / every / at]
-    gate[Verify gate<br/>FARM_VERIFY_CMD]
-  end
-  subgraph ddb[The farm store: SQLite on one box, DynamoDB across boxes]
-    q[(Shared queue<br/>parents, children, leases)]
-    b[(Budget per seat<br/>5h + 7d utilization)]
-    s[(Slots per seat)]
-  end
-  origin[(git origin)]
-  claude[(Claude)]
+The picture at the top, step by step:
 
-  app <--> rc
-  cli --> q
-  w -- claim / finish --> q
-  sched -- queue when due --> q
-  w -- "task add --parent" --> q
-  w -- rate_limit_event --> b
-  b -- governor --> s
-  w -- take a slot --> s
-  w --> gate --> origin
-  rc & w <--> claude
-```
+1. **You talk to your Claude** in the Claude app (Remote Control). Every Claude on the farm is one person's
+   account, kept reachable by its own `clodfarm run`.
+2. **It starts sub-agents** with `clodfarm spawn`: a headless `claude -p` in its own git worktree, shown on the
+   farm as a mini Claude next to it. Any Claude whose account has budget free runs it, unless `--on <name>` pins
+   it. A sub-agent's own sub-agents are its children; it ends its run and is resumed *in its own session* with their
+   results to merge them.
+3. **The budget governor** decides, per account, how many sub-agents may run right now. Usage comes from Claude
+   Code's own `rate_limit_event`s during every run, from a one-word probe the moment a Claude logs in, and again
+   whenever it has been idle for `FARM_USAGE_REFRESH` seconds.
+4. **Claudes talk to each other:** `clodfarm msg gil "..."` shows up in Gil's next conversation turn (a Claude Code
+   hook), and `clodfarm agents` shows who has budget left, so a Claude that is running low sends work elsewhere.
+5. **When a sub-agent finishes,** its branch is rebased onto `main`, `FARM_VERIFY_CMD` runs, and `main` moves only
+   if the check passes. Otherwise the sub-agent is resumed with the failure output.
+6. **Schedules** start sub-agents on a cron line (in your time zone), every N minutes or once at a time. Every box
+   checks; each firing is claimed atomically, so it runs once.
 
-1. **A worker** asks the governor how many agents *its seat* may run right now, takes one of that seat's slots,
-   claims the highest-priority task (an atomic conditional write, with a lease it keeps renewing), and starts
-   `claude -p --output-format stream-json` in the task's own git worktree.
-2. **While it runs**, every `rate_limit_event` updates that seat's budget, so all its boxes react within seconds.
-3. **When it ends:**
-   - **Waiting on children:** the parent stays open and is resumed in the same session when they finish.
-   - **A sub-task:** its branch waits for the parent to merge it.
-   - **A top-level task:** it's rebased onto `main`, `FARM_VERIFY_CMD` runs, and it fast-forwards `main` only if
-     the check passes. Otherwise the agent is resumed with the failure output.
-4. **A schedule that is due** queues its task (every box checks; each firing is claimed atomically, so it runs once).
-   A task with `--to <name>` is only taken by that Claude's boxes.
-5. **Optional planner** (`FARM_PLANNER=1`): when the queue is empty and there's budget, one planner run turns
-   `MISSION.md` into the next tasks, and backs off when there's nothing useful to do.
+Everything lives in one store: a SQLite file on one box, or a DynamoDB table shared by several boxes and accounts.
 
 <details>
 <summary><b>The budget governor, in detail</b></summary>
@@ -256,7 +228,7 @@ More: [architecture](docs/architecture.md) · [what agents are told](docs/agents
 |  | `while` loop | Single-loop runners (e.g. ralph, continuous-claude) | **clodfarm** |
 |---|:---:|:---:|:---:|
 | Runs unattended, survives crashes | ❌ | ✅ | ✅ |
-| Parallel agents | ❌ | via separate instances | ✅ shared queue |
+| Parallel agents | ❌ | via separate instances | ✅ visible sub-agents |
 | Sub-agent tree, parent resumes in its own session | ❌ | ❌ | ✅ |
 | Paces on the real 5-hour **and** weekly utilization | ❌ | waits out limits | ✅ per seat |
 | Several boxes and accounts in one farm | ❌ | ❌ | ✅ |
@@ -283,15 +255,15 @@ Details and caveats: [docs/auth.md](docs/auth.md).
 
 | Command | |
 |---|---|
-| `clodfarm status` | seats, queue, workers, running tasks, the Remote Control link |
+| `clodfarm status` | the Claudes, their budget, the links to talk to them, the sub-agents at work |
+| `clodfarm agents` | every Claude on the farm and the budget it has left |
 | `clodfarm budget [--refresh]` | every seat's usage and what the governor allows it now |
-| `clodfarm task add TITLE --prompt ... [--parent ID] [--to NAME] [--priority 0-9]` | queue work (agents use the same command); `--to` hands it to one Claude |
-| `clodfarm task list / show / cancel / retry` | inspect and manage tasks |
-| `clodfarm agents` | the Claudes on this farm |
+| `clodfarm spawn TITLE --prompt ... [--on NAME]` | start a sub-agent (the Claudes use the same command) |
+| `clodfarm subagents [--all]` · `result ID [--wait]` · `cancel ID` · `retry ID` | follow and manage sub-agents |
+| `clodfarm msg NAME TEXT` · `inbox` | messages between the Claudes |
 | `clodfarm schedule add TITLE (--cron ... [--tz ...] \| --every 2h \| --at ...)` / `list` / `remove ID` | scheduled tasks |
-| `clodfarm mission [TEXT]` | show or set `MISSION.md`, for the optional planner (`FARM_PLANNER=1`) |
-| `clodfarm events [-f]` | the event log: claims, merges, checks, pauses, limits |
-| `clodfarm pause [reason]` / `resume` | stop and restart new work on every box |
+| `clodfarm events [-f]` | the event log: sub-agents, merges, checks, messages, pauses, limits |
+| `clodfarm pause [reason]` / `resume` | stop and restart new sub-agents on every box |
 | `clodfarm login / whoami / doctor` | login and a setup check |
 
 Every command takes `--json`.
@@ -301,7 +273,9 @@ Every command takes `--json`.
 
 | Variable | Default | |
 |---|---|---|
-| `FARM_MAX_WORKERS` | `3` | parallel agents per box (upper bound; the governor decides) |
+| `FARM_MAX_WORKERS` | `3` | sub-agents one Claude may run at once (upper bound; the governor decides) |
+| `FARM_USAGE_REFRESH` | `300` | re-measure an idle Claude's usage after this many seconds (0 = only from runs) |
+| `FARM_TZ` | `UTC` | default time zone for `clodfarm schedule` |
 | `FARM_MODEL` / `FARM_EFFORT` | `opus` / default | model and effort for every agent |
 | `FARM_WEEKLY_TARGET` | `0.80` | agents stop at 80% of the weekly window |
 | `FARM_FIVE_HOUR_CEILING` | `0.85` | max share of a 5-hour window |
@@ -312,7 +286,6 @@ Every command takes `--json`.
 | `FARM_STALL_THRESHOLD` | `5` | failed runs in a row that pause the farm |
 | `FARM_REMOTE_CONTROL` | `1` | keep a Remote Control session up |
 | `FARM_PERMISSION_MODE` | `bypassPermissions` | the container is the sandbox ([security](docs/security.md)) |
-| `FARM_MISSION` | *(empty)* | the mission, if you'd rather set it at start than with `clodfarm mission` |
 | `FARM_STORE` | `sqlite` | `dynamodb` to share one farm across boxes and accounts (setting `FARM_TABLE` implies it) |
 | `FARM_TABLE` / `FARM_SEAT` | `clodfarm` / from login | which DynamoDB farm to join / override the seat name |
 </details>

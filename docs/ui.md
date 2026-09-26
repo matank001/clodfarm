@@ -3,48 +3,49 @@
 `clodfarm run` serves a small web UI on port 8080 (`FARM_UI_PORT`; `FARM_UI=0` turns it off; `clodfarm ui` serves it
 alone). Compose publishes it on `127.0.0.1:8080`, so it is reachable from the machine itself only. To reach it from
 elsewhere, put a TLS reverse proxy in front (`FARM_UI_BASE=/team` serves it under a path, `FARM_UI_TRUST_PROXY=1`
-reads the client address from `X-Forwarded-For` for the login lockout, `FARM_UI_SECURE=1` marks the cookie Secure) (it should send `X-Forwarded-Proto: https`, which marks the cookie
-`Secure`), or use an SSH tunnel: `ssh -L 8080:localhost:8080 myserver`.
+reads the client address from `X-Forwarded-For` for the login lockout, `FARM_UI_SECURE=1` or `X-Forwarded-Proto: https`
+marks the cookie Secure), or use an SSH tunnel: `ssh -L 8080:localhost:8080 myserver`.
 
 ## What you see
 
 | On the farm | What it is |
 |---|---|
-| A Claude critter | One worker (`w0`, `w1`, ...) of one agent. The hat tells agents apart. |
-| At a terminal by a crop plot | Running that task. Hover it to read the title, click it for the details. |
-| Napping by the barn (`Zzz`) | Throttled: the budget governor is pacing this account. |
+| A Claude critter | One Claude: one person's account. The hat tells them apart. |
+| At a terminal by a crop plot | It has sub-agents at work; they stand around its plot. |
+| A mini Claude | One of its sub-agents, tinted with the colour of the Claude whose account runs it (a sub-agent can run on a teammate's budget). It types while it works and shows `…` while it waits for budget. |
+| Napping by the barn (`Zzz`) | Resting: its budget governor is pacing this account. |
 | `‖` | The farm is paused. |
-| `!` | The worker reported an error, or the agent's process isn't running. |
-| An egg with `?` | An agent that isn't logged in yet. Click it to log it in. |
-| Crops | Running tasks grow; done tasks bloom into Claude's spark; failed ones wilt. |
-| A mini Claude | A sub-worker: a sub-task of the task on that plot. It types when it's working and shows `…` while it waits for a free Claude. |
+| `!` | Its `clodfarm run` isn't running, or reported an error. |
+| An egg with `?` | A Claude that isn't logged in yet. Click it to log it in. |
+| Crops | They grow while a Claude's sub-agents work; finished work blooms into Claude's spark, failed work wilts. |
 
 At night (your local time) the farm gets dark and the terminals glow.
 
-Click a Claude for its status, what it's working on, its sub-workers, its tasks of the last 7 days, its budget
-left (5-hour and 7-day) and **TALK TO IT**: the link to its Remote Control session in the Claude app. That's where
-you give it work: it does it, starts sub-workers, hands work to the other Claudes on the farm (`--to <name>`) and
-schedules tasks. **+ NEW CLAUDE** (key `C`) adds a Claude login.
+Click a Claude for its status, its budget left (5-hour and 7-day, measured the moment it logs in and kept current),
+its sub-agents (and the ones it runs for others), and **TALK TO IT**: the link to its Remote Control session in the
+Claude app. That's where you give it work. Click a mini Claude for that sub-agent's job, where it runs and its own
+sub-agents. **+ NEW CLAUDE** (key `C`) adds a Claude login.
 
-When you **release** a Claude, it leaves with its workers: its `clodfarm run` stops, its running tasks go back to
-the queue for another Claude, and its heartbeats are dropped so it no longer shows on the farm.
+When you **release** a Claude, it leaves with everything it was running: its `clodfarm run` stops, its sub-agents go
+back to wait for another Claude with budget, and it no longer shows on the farm.
 
-## Agents ("hatching")
+## Adding Claudes ("hatching")
 
-The container's own login is the primary agent. **+ NEW CLAUDE** (or an egg on the farm) adds another one:
+The container's own login is the farm's first Claude. **+ NEW CLAUDE** (or an egg on the farm) adds another one:
 
 1. The UI creates a Claude config dir for it (`~/.claude/clodfarm-agents/<name>`, inside the claude-home volume, so
    the login survives a new container) and starts `claude auth login` for it in a pseudo-terminal.
 2. You open the login link it prints, approve, and paste the code back into the UI. clodfarm types the code into
    Claude Code and never stores or logs it.
-3. A child `clodfarm run` starts with that config dir and `FARM_NAME=<name>`. It joins the same queue and repo, and
-   the governor paces it on that account's own usage (it is a new *seat*, see [multi-seat.md](multi-seat.md)).
+3. A child `clodfarm run` starts with that config dir and `FARM_NAME=<name>`: its own Remote Control session (it
+   shows up in that person's Claude app under Code), the same repo and farm, and the governor paces it on that
+   account's own usage (a new *seat*, see [multi-seat.md](multi-seat.md)). Its usage is measured right away.
 
-Log in with a different Claude account to add capacity. The same account a second time adds workers but shares one
-budget. **Release** stops the agent (its running task goes back to the queue), logs it out and deletes its config dir.
+Log in with a different Claude account for each person. **Release** stops that Claude (its sub-agents wait for
+another Claude with budget), logs it out and deletes its config dir.
 
 The token and API key from the container's environment (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`) are never
-passed to hatched agents: each one uses only its own login.
+passed to hatched Claudes: each one uses only its own login.
 
 ## Password
 

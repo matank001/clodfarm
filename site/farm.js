@@ -1,5 +1,5 @@
-/* clodfarm UI. A living pixel farm: every Claude Code worker is a Claude critter that wanders, tends a crop
- * (its task) at a terminal, or naps when the budget governor says so. Plain JS, no build step, no dependencies. */
+/* clodfarm UI. A living pixel farm: every Claude on the farm is a Claude critter that wanders, watches its sub-agents
+ * at their plot, or naps when its budget says so; sub-agents are mini Claudes. Plain JS, no build step, no dependencies. */
 "use strict";
 
 // ================================================================== utilities
@@ -662,85 +662,71 @@ const Scene = {
 // ============================================================== farm state sync
 const App = { state: null, seenAgents: null, seenEvents: 0, lastTitles: {}, polling: null, user: null };
 
-function modeOf(w, paused) {
-  const s = (w?.state || "").toLowerCase();
-  if (s === "running") return "work";
-  if (s.startsWith("throttled")) return "sleep";
-  if (s.startsWith("paused") || paused) return "rest";
-  if (s.startsWith("error")) return "error";
-  return "wander";
-}
-
 function colorFor(id) { return HAT_COLORS[hashStr(id) % HAT_COLORS.length]; }
 
+const SUB_SPOTS = [[4, -2], [22, -2], [4, 23], [22, 23], [13, -2], [13, 23], [33, 4], [33, 16]];
+
+/** The farm from the state: one critter per Claude, and a mini Claude for each of its sub-agents (tinted with the
+ * colour of the Claude whose account runs it). A Claude with sub-agents at work gets a plot and watches them there. */
 function reconcile(st) {
   const first = App.seenAgents === null;
   App.seenAgents = App.seenAgents || new Set();
-  const want = new Map();
-  for (const a of st.agents) {
-    const base = { agent: a, hat: a.hat || "straw", color: colorFor(a.id) };
-    if (!a.loggedIn && !a.remote) want.set("egg:" + a.id, { ...base, kind: "egg", mode: "egg" });
-    else if (!a.workers.length) want.set("agent:" + a.id, { ...base, kind: "claude", mode: a.alive ? "starting" : "offline", worker: null });
-    else for (const w of a.workers) want.set(w.id, { ...base, kind: "claude", worker: w, mode: modeOf(w, st.paused) });
-  }
-  const L = Scene.world.L;
-  const eggs = new Map([...Scene.critters.values()].filter(c => c.kind === "egg" && !c.gone).map(c => [c.agent.id, c]));
-  const byId = new Map(["running", "waiting", "queued", "done", "failed"].flatMap(k => st.tasks[k]).map(t => [t.id, t]));
-  const rootOf = (t) => { let r = t, n = 0; while (r?.parent && byId.get(r.parent) && n++ < 6) r = byId.get(r.parent); return r; };
-  // one plot per top-level quest in progress; its sub-agents work around it
-  const tops = [...st.tasks.running, ...st.tasks.waiting].filter(t => !t.parent || !byId.has(t.parent)).sort((a, b) => a.id < b.id ? -1 : 1);
-  const plotOf = new Map(tops.map((t, i) => [t.id, L.plots[i]]));
-  const subSlot = new Map(); // plot -> next free spot index
-  const spotFor = (plot, main) => {
-    if (main) return { x: plot.x - 7, y: plot.y + plot.h };
-    const k = subSlot.get(plot) || 0; subSlot.set(plot, k + 1);
-    const spots = [[4, -2], [22, -2], [4, plot.h + 9], [22, plot.h + 9], [13, -2], [13, plot.h + 9], [33, 4], [33, plot.h + 2]];
-    const [dx, dy] = spots[k % spots.length];
-    return { x: plot.x + dx, y: plot.y + dy };
+  const want = new Map(), L = Scene.world.L, subs = st.subagents || [];
+  const ids = new Set(st.agents.map(a => a.id)), home = (st.agents.find(a => a.primary) || st.agents[0] || {}).id;
+  const ownerOf = (t) => ids.has(t.owner) ? t.owner : home;
+  const active = st.agents.filter(a => subs.some(t => ownerOf(t) === a.id));
+  const plotOf = new Map(active.map((a, i) => [a.id, L.plots[i % L.plots.length]]));
+  const used = new Map();
+  const spotFor = (plot) => {
+    const n = used.get(plot) || 0; used.set(plot, n + 1);
+    const [dx, dy] = SUB_SPOTS[n % SUB_SPOTS.length];
+    return { x: plot.x + dx + Math.floor(n / SUB_SPOTS.length) * 3, y: plot.y + (dy > plot.h ? plot.h + 9 : dy) };
   };
-  // quests waiting for a free Claude that belong to an active quest: little sub-agents standing by
-  for (const t of st.tasks.queued) {
-    const root = t.parent && rootOf(t);
-    if (root && root.id !== t.id && plotOf.has(root.id)) want.set("sub:" + t.id, { agent: { id: "sub", name: "sub-agent", workers: [] }, hat: "", color: "#9aa3b2", kind: "claude", mini: true, mode: "subwait", task: t, root });
+  for (const a of st.agents) {
+    const plot = plotOf.get(a.id);
+    const mode = !a.loggedIn && !a.remote ? "egg" : !a.alive ? "offline" : !a.up ? "starting" : a.error ? "error"
+      : plot ? "work" : st.paused ? "rest" : a.resting ? "sleep" : "wander";
+    want.set((mode === "egg" ? "egg:" : "claude:") + a.id, { agent: a, hat: a.hat || "straw", color: colorFor(a.id),
+      kind: mode === "egg" ? "egg" : "claude", mode, spot: plot ? { x: plot.x - 7, y: plot.y + plot.h } : null });
   }
+  for (const t of subs) {
+    const owner = st.agents.find(a => a.id === ownerOf(t)), plot = owner && plotOf.get(owner.id);
+    if (!plot) continue;
+    want.set("sub:" + t.id, { agent: owner, sub: t, kind: "claude", mini: true, hat: "", color: t.on ? colorFor(t.on) : "#9aa3b2",
+      mode: t.status === "running" ? "work" : "subwait", spot: spotFor(plot) });
+  }
+  const eggs = new Map([...Scene.critters.values()].filter(c => c.kind === "egg" && !c.gone).map(c => [c.agent.id, c]));
   for (const [key, d] of want) {
     let c = Scene.critters.get(key);
     if (!c) {
-      const egg = eggs.get(d.agent.id);
+      const egg = !d.mini && eggs.get(d.agent.id), owner = d.mini && Scene.critters.get("claude:" + d.agent.id);
       let p = first ? Scene.randomSpot() : { x: L.door.x + (Math.random() - 0.5) * 6, y: L.door.y + 4 };
       if (egg && d.kind === "claude") { p = { x: egg.x, y: egg.y }; Scene.sparkle(egg.x, egg.y - 6, 24); }
+      if (owner) p = { x: owner.x, y: owner.y }; // a new sub-agent pops out of its Claude
       if (d.kind === "egg" && !first) p = Scene.randomSpot();
+      if (first && d.spot) p = { ...d.spot }; // on the first look, everyone is already where they work
       c = new Critter(key, p.x, p.y);
-      if (!first && d.kind === "claude") { c.born = performance.now(); if (!egg) Scene.sparkle(p.x, p.y - 8, 16); }
+      if (!first && d.kind === "claude") { c.born = performance.now(); if (!egg) Scene.sparkle(p.x, p.y - 8, d.mini ? 8 : 16); }
       else c.born = performance.now() - 5000;
       Scene.critters.set(key, c);
-      if (!first && !App.seenAgents.has(d.agent.id)) UI.say(d.kind === "egg" ? `An egg appeared! Tap it to hatch ${d.agent.name.toUpperCase()}.` : `A wild ${d.agent.name.toUpperCase()} appeared!`);
+      if (!d.mini && !first && !App.seenAgents.has(d.agent.id)) UI.say(d.kind === "egg" ? `An egg appeared! Tap it to hatch ${d.agent.name.toUpperCase()}.` : `A wild ${d.agent.name.toUpperCase()} appeared!`);
       else if (!first && egg && d.kind === "claude") UI.say(`${d.agent.name.toUpperCase()} hatched! Welcome to the farm.`);
     }
     c.gone = 0;
-    Object.assign(c, { kind: d.kind, agent: d.agent, worker: d.worker, hat: d.hat, color: d.color, mode: d.mode, task: d.task || null });
-    const task = d.task || (d.worker?.task && byId.get(d.worker.task));
-    const root = task && rootOf(task);
-    c.mini = !!(d.mini || (task && task.parent && root && root.id !== task.id));
-    c.root = c.mini ? root : null;
-    if (d.worker?.task) c.task = task || null;
-    const plot = root && plotOf.get(root.id);
-    c.spot = plot ? spotFor(plot, !c.mini) : null;
-    if (c.mode === "work" && !c.spot) c.mode = "wander";
-    const title = task?.title || d.worker?.task_title || "";
-    c.label = c.mini ? "" : d.kind === "egg" ? d.agent.name : (d.agent.workers.length > 1 && d.worker ? `${d.agent.name}·${d.worker.name}` : d.agent.name);
+    Object.assign(c, { kind: d.kind, agent: d.agent, sub: d.sub || null, hat: d.hat, color: d.color, mode: d.mode, mini: !!d.mini, spot: d.spot });
+    const n = subs.filter(t => ownerOf(t) === d.agent.id).length;
+    c.label = d.mini ? "" : d.agent.name;
     c.bubble = c.kind === "egg" ? { icon: d.agent.login?.state === "waiting_code" ? "dots" : "ask" }
-      : c.mode === "work" ? { icon: d.worker?.task && st.tasks.running.find(t => t.id === d.worker.task)?.kind === "plan" ? "plan" : "terminal", title }
+      : d.mini ? (d.mode === "work" ? { icon: "terminal", title: d.sub.title } : { icon: "dots", title: d.sub.title })
+      : c.mode === "work" ? { icon: "terminal", title: `${n} SUB-AGENT${n === 1 ? "" : "S"}` }
       : c.mode === "sleep" ? { icon: "zzz" } : c.mode === "rest" ? { icon: "pause" } : c.mode === "error" ? { icon: "alert", alert: true }
-      : c.mode === "subwait" ? { icon: "dots", title }
       : c.mode === "starting" ? { icon: "dots" } : c.mode === "offline" ? { icon: "alert", alert: true } : null;
   }
   for (const [key, c] of Scene.critters) if (!want.has(key) && !c.gone) { c.gone = performance.now(); if (c.kind !== "egg") Scene.sparkle(c.x, c.y - 8, 8, "#d8e6c4"); }
   for (const a of st.agents) App.seenAgents.add(a.id);
-  // the field: running first, then the latest harvest, then what wilted
-  const plots = [...tops, ...st.tasks.done.filter(t => !t.parent), ...st.tasks.failed.filter(t => !t.parent).slice(0, 2)].slice(0, L.plots.length);
-  Scene.plotTasks = plots;
-  Scene.boardCount = st.counts.queued;
+  // the field: one plot growing per Claude with sub-agents at work, then the latest harvest
+  const since = (a) => Math.min(...subs.filter(t => ownerOf(t) === a.id).map(t => t.started || t.created || nowS()));
+  Scene.plotTasks = [...active.map(a => ({ id: "claude:" + a.id, status: "running", started: since(a) })), ...(st.recent || [])].slice(0, L.plots.length);
 }
 
 // =========================================================================== UI
@@ -755,19 +741,17 @@ const api = async (path, body) => {
 };
 
 const EVENT_TEXT = {
-  "task.added": (e, T) => { const to = (e.msg.match(/\(for ([^)]+)\)$/) || [])[1]; return `New task${to ? " for " + to.toUpperCase() : ""}: “${T(e).replace(/ \(for [^)]+\)$/, "")}”.`; },
-  "task.claimed": (e, T) => { const w = e.msg.split(" by ")[1] || ""; return `${w ? w.split("@")[0] + "·" + w.split("/").pop() : "A Claude"} started “${T(e)}”.`; },
-  "task.done": (e, T) => `★ Done: “${T(e)}”!`,
-  "task.failed": (e, T) => `Failed: “${T(e)}”. Ask your Claude what went wrong.`,
-  "task.waiting": (e, T) => `“${T(e)}” split into sub-workers and waits for them.`,
-  "task.resume": (e, T) => `Back to “${T(e)}”: its sub-workers are done.`,
-  "task.cancelled": (e, T) => `Cancelled: “${T(e)}”.`,
+  "task.added": (e, T) => { const on = (e.msg.match(/\(for ([^)]+)\)$/) || [])[1]; return `${(e.by && !/^\d/.test(e.by) ? e.by : "A Claude").toUpperCase()} started a sub-agent${on ? " on " + on.toUpperCase() : ""}: “${T(e).replace(/ \(for [^)]+\)$/, "")}”.`; },
+  "task.done": (e, T) => `★ Sub-agent done: “${T(e)}”!`,
+  "task.failed": (e, T) => `A sub-agent failed: “${T(e)}”. Ask its Claude what went wrong.`,
+  "task.waiting": (e, T) => `“${T(e)}” started its own sub-agents and waits for them.`,
   "verify.passed": (e, T) => `Tests passed for “${T(e)}”. Harvesting it into main!`,
   "verify.failed": (e, T) => `Tests failed for “${T(e)}”. Sent back to fix them.`,
+  "msg.sent": (e) => { const m = e.msg.match(/^(\S+) -> (\S+): ([\s\S]*)$/); return m ? `${m[1].toUpperCase()} → ${m[2].toUpperCase()}: “${m[3].slice(0, 90)}”` : null; },
   "schedule.added": (e) => `Scheduled: “${e.msg.replace(/^\S+\s*/, "")}”.`,
   "farm.paused": (e) => `The farm is paused: ${e.msg || "by hand"}.`,
   "farm.resumed": () => "The farm is back at work!",
-  "budget.rejected": () => "Usage limit reached. These Claudes nap until the window resets.",
+  "budget.rejected": () => "A Claude hit its usage limit. It rests until the window resets; the others carry on.",
   "rc.connected": (e) => `${((e.msg.match(/'([^']+)'/) || [])[1] || "A Claude").toUpperCase()} is live in the Claude app: talk to it from your phone.`,
   "agent.added": (e) => `A new egg for ${e.msg.split(" ")[0].toUpperCase()}. Finish its login to hatch it.`,
   "agent.removed": (e) => `${e.msg.split(" ")[0].toUpperCase()} left the farm.`,
@@ -808,7 +792,7 @@ const UI = {
     let st;
     try { st = await api("api/state"); } catch { return; }
     App.state = st;
-    for (const k of ["running", "waiting", "queued", "done", "failed"]) for (const t of st.tasks[k]) App.lastTitles[t.id] = t.title;
+    for (const t of [...st.subagents, ...st.recent]) App.lastTitles[t.id] = t.title;
     reconcile(st);
     this.renderHud(st);
     if (first) this.welcome(st);
@@ -818,8 +802,8 @@ const UI = {
   welcome(st) {
     const live = st.agents.filter(a => a.loggedIn);
     if (!live.length) { this.say(`Welcome to ${st.farm.toUpperCase()}! No Claude lives here yet. Tap the egg (or + NEW CLAUDE) to log in your first one.`); return; }
-    const n = st.agents.reduce((s, a) => s + a.workers.length, 0);
-    this.say(`Welcome back to ${st.farm.toUpperCase()}! ${n} Claude${n === 1 ? "" : "s"} on the farm, ${st.counts.running} at work.`);
+    const n = live.length, busy = st.subagents.filter(t => t.status === "running").length;
+    this.say(`Welcome back to ${st.farm.toUpperCase()}! ${n} Claude${n === 1 ? "" : "s"} on the farm, ${busy} sub-agent${busy === 1 ? "" : "s"} at work.`);
     this.say("Talk to your Claude from the Claude app on your phone (Remote Control). Tap a Claude for its link.");
   },
   pushEvents(st) {
@@ -833,11 +817,12 @@ const UI = {
     }
   },
   renderHud(st) {
-    const claudes = st.agents.reduce((s, a) => s + a.workers.length, 0), eggs = st.agents.filter(a => !a.loggedIn && !a.remote).length;
+    const claudes = st.agents.filter(a => a.loggedIn || a.remote).length, eggs = st.agents.length - claudes;
+    const busy = st.subagents.filter(t => t.status === "running").length, waiting = st.subagents.length - busy;
     const chips = [
       h("span", { class: "chip" }, h("i", { class: "dot" + (claudes ? "" : " off") }), `${st.farm.toUpperCase()}`),
       h("span", { class: "chip" }, "CLAUDES ", h("b", { text: String(claudes) }), eggs ? ` · EGGS ${eggs}` : ""),
-      h("span", { class: "chip" }, "AT WORK ", h("b", { text: String(st.counts.running) }), st.counts.queued ? [" · WAITING ", h("b", { text: String(st.counts.queued) })] : null),
+      h("span", { class: "chip" }, "SUB-AGENTS ", h("b", { text: String(busy) }), waiting ? [" · WAITING ", h("b", { text: String(waiting) })] : null),
     ];
     const me = st.agents.find(a => a.primary);
     $("#talk-name").textContent = me?.name || st.farm;
@@ -920,9 +905,13 @@ const UI = {
   },
   agentState(a) {
     if (!a.loggedIn && !a.remote) return a.login?.state === "waiting_code" ? "WAITING FOR ITS LOGIN CODE" : "AN EGG: NEEDS A CLAUDE LOGIN";
-    if (!a.workers.length) return a.alive ? "WAKING UP…" : "NOT RUNNING";
-    const busy = a.workers.filter(w => w.state === "running").length, sleep = a.workers.filter(w => (w.state || "").startsWith("throttled")).length;
-    return `${busy}/${a.workers.length} WORKING` + (sleep ? ` · ${sleep} NAPPING (BUDGET)` : "");
+    if (!a.alive) return "NOT RUNNING";
+    if (!a.up) return "WAKING UP… (MEASURING ITS USAGE)";
+    if (a.error) return a.error.toUpperCase();
+    const n = App.state.subagents.filter(t => t.owner === a.id).length;
+    if (n) return `${n} SUB-AGENT${n === 1 ? "" : "S"} AT WORK`;
+    if (a.resting) return "RESTING: " + (a.budget?.reason || "paced by its budget").toUpperCase();
+    return "READY: TALK TO IT";
   },
   openCritter(c) {
     if (c.kind === "egg") return this.openHatch(c.agent.id);
@@ -932,32 +921,44 @@ const UI = {
     $("#dlg-summary").showModal();
   },
   renderSummary(c) {
-    const st = App.state, sub = c.agent.id === "sub";
-    const a = sub ? null : st.agents.find(x => x.id === c.agent.id) || c.agent, w = c.worker, b = a?.budget || {};
-    const byId = new Map(["running", "waiting", "queued", "done", "failed"].flatMap(k => st.tasks[k]).map(t => [t.id, t]));
-    const task = c.task && (byId.get(c.task.id) || c.task);
+    const st = App.state, badge = (t) => h("span", { class: `badge ${t.status}`, text: { running: "WORKING", queued: "WAITING", waiting: "WAITING", done: "DONE", failed: "FAILED", cancelled: "CANCELLED" }[t.status] || t.status.toUpperCase() });
     const g = $("#sum-sprite").getContext("2d"); g.imageSmoothingEnabled = false; g.clearRect(0, 0, 32, 32);
     if (c.mini) g.drawImage(miniSprite(c.color, {}), 11, 12); else g.drawImage(critterSprite(c.hat, c.color, { legs: 0 }), 8, 8);
-    $("#sum-name").textContent = sub ? "SUB-AGENT" : (c.mini ? `SUB-AGENT · ${a.name}` : w ? `${a.name} · ${w.name}` : a.name).toUpperCase();
-    $("#sum-sub").textContent = sub ? "Waiting for a free Claude to start it." : [a.plan && `Claude ${a.plan}`, a.email].filter(Boolean).join(" · ");
-    const doing = sub ? "WAITING" : !w ? this.agentState(a) : w.state === "running" ? "WORKING"
-      : (w.state || "").startsWith("throttled") ? "NAPPING: " + (b.reason || "paced by the budget") : (w.state || "").toUpperCase();
-    const kids = task ? (task.children || []).map(id => byId.get(id)).filter(Boolean) : [];
-    const parts = [h("dl", { class: "stat-row" },
-      h("dt", { text: "STATUS" }), h("dd", { text: doing }),
-      c.root && c.root.id !== task?.id ? [h("dt", { text: "HELPING ON" }), h("dd", { text: c.root.title })] : null,
-      !sub && a.stats ? [h("dt", { text: "TASKS (7D)" }), h("dd", { text: `${a.stats.done} done · ${a.stats.failed} failed · ${a.stats.took} taken` })] : null,
-      w ? [h("dt", { text: "LAST SEEN" }), h("dd", { text: ago(w.at) })] : null)];
-    if (a && !sub && !c.mini && a.loggedIn) parts.push(h("h3", { text: "TALK TO IT" }), a.remote_control
+    let parts;
+    if (c.mini) { // a sub-agent
+      const t = st.subagents.find(x => x.id === c.sub.id) || c.sub, all = new Map(st.subagents.map(x => [x.id, x]));
+      const kids = (t.children || []).map(id => all.get(id)).filter(Boolean), parent = t.parent && all.get(t.parent);
+      $("#sum-name").textContent = `SUB-AGENT · ${c.agent.name}`.toUpperCase();
+      $("#sum-sub").textContent = `Started by ${c.agent.name}` + (t.on && t.on !== c.agent.id ? `, running on ${t.on}'s account` : "");
+      parts = [h("dl", { class: "stat-row" },
+        h("dt", { text: "STATUS" }), h("dd", { text: t.status === "running" ? `WORKING ON ${String(t.on || "").toUpperCase()}'S BUDGET`
+          : t.status === "waiting" ? "WAITING FOR ITS OWN SUB-AGENTS" : t.to ? `WAITING FOR ${t.to.toUpperCase()}` : "WAITING FOR A CLAUDE WITH BUDGET" }),
+        t.started ? [h("dt", { text: "STARTED" }), h("dd", { text: ago(t.started) })] : null,
+        parent ? [h("dt", { text: "HELPING" }), h("dd", { text: parent.title })] : null),
+        h("h3", { text: "ITS JOB" }), h("p", { class: "job-text", text: t.title }),
+        kids.length ? [h("h3", { text: `ITS SUB-AGENTS (${kids.length})` }), h("ul", { class: "subs" }, kids.map(k => h("li", {}, badge(k), h("span", { text: k.title }))))] : null,
+        h("p", { class: "muted small", text: `Its result: ask ${c.agent.name}, or run clodfarm result ${t.id}` })];
+      fill($("#sum-body"), parts); fill($("#sum-actions"));
+      return;
+    }
+    const a = st.agents.find(x => x.id === c.agent.id) || c.agent, b = a.budget || {};
+    const mine = st.subagents.filter(t => t.owner === a.id), elsewhere = st.subagents.filter(t => t.on === a.id && t.owner !== a.id);
+    $("#sum-name").textContent = a.name.toUpperCase();
+    $("#sum-sub").textContent = [a.plan && `Claude ${a.plan}`, a.email].filter(Boolean).join(" · ");
+    parts = [h("dl", { class: "stat-row" },
+      h("dt", { text: "STATUS" }), h("dd", { text: this.agentState(a) }),
+      a.stats ? [h("dt", { text: "RAN (7D)" }), h("dd", { text: `${a.stats.ran} sub-agents · ${a.stats.done} done · ${a.stats.failed} failed` })] : null)];
+    if (a.loggedIn) parts.push(h("h3", { text: "TALK TO IT" }), a.remote_control
       ? [h("a", { class: "btn primary login-link", href: a.remote_control, target: "_blank", rel: "noopener noreferrer" }, "OPEN IN THE CLAUDE APP ↗"),
-        h("p", { class: "muted small", text: `Or open the Claude app, go to Code and pick “${a.name}”. Ask it anything: it can start sub-workers, hand work to the other Claudes here and schedule tasks.` })]
+        h("p", { class: "muted small", text: `Or open the Claude app, go to Code and pick “${a.name}”. It starts sub-agents, asks the other Claudes for help and schedules work, and it watches its budget.` })]
       : h("p", { class: "muted small", text: a.remote ? "It lives on another box: talk to it from its own Claude app." : "Its Remote Control session is starting. It shows up in the Claude app under Code." }));
-    if (task) parts.push(h("h3", { text: "WORKING ON" }), h("p", { class: "quest-text", text: task.title }));
-    if (kids.length) parts.push(h("h3", { text: `SUB-WORKERS (${kids.length})` }), h("ul", { class: "subs" }, kids.map(k => h("li", {},
-      h("span", { class: `badge ${k.status}`, text: { running: "WORKING", queued: "WAITING", waiting: "WAITING", done: "DONE", failed: "FAILED", cancelled: "CANCELLED" }[k.status] || k.status.toUpperCase() }),
-      h("span", { text: k.title })))));
-    if (!sub) parts.push(h("h3", { text: "BUDGET LEFT" }), this.hp("5H", b.five_hour, b.five_hour_resets), this.hp("7D", b.seven_day, b.seven_day_resets),
-      b.max ? h("p", { class: "muted small", text: `${b.allowed ?? "?"} of ${b.max} Claudes allowed to work right now` }) : null);
+    parts.push(h("h3", { text: "BUDGET LEFT" }), this.hp("5H", b.five_hour, b.five_hour_resets), this.hp("7D", b.seven_day, b.seven_day_resets),
+      h("p", { class: "muted small", text: b.measured ? `Measured ${ago(b.measured)}. ` + (b.can_start ? `It can start ${b.can_start} more sub-agent${b.can_start === 1 ? "" : "s"} now.` : `No new sub-agents on its account now: ${b.reason}.`)
+        : "Measuring its usage…" }));
+    if (mine.length) parts.push(h("h3", { text: `ITS SUB-AGENTS (${mine.length})` }), h("ul", { class: "subs" }, mine.map(t => h("li", {}, badge(t),
+      h("span", { text: t.title + (t.on && t.on !== a.id ? ` · on ${t.on}` : "") })))));
+    if (elsewhere.length) parts.push(h("h3", { text: `HELPING OTHERS (${elsewhere.length})` }), h("ul", { class: "subs" }, elsewhere.map(t => h("li", {}, badge(t),
+      h("span", { text: `${t.title} · for ${t.owner}` })))));
     fill($("#sum-body"), parts);
     const acts = [];
     if (a && !a.primary && !a.remote && !c.mini) {
@@ -1058,7 +1059,7 @@ const UI = {
 };
 
 // ================================================================ landing demo
-/** clod.farm's landing page runs the same farm on a scripted day: quests grow, sub-agents help, a Claude naps,
+/** clod.farm's landing page runs the same farm on a scripted day: sub-agents grow crops, Claudes help each other, one naps,
  * a new one arrives. No server, no data: just the renderer. */
 const Demo = {
   start() {
@@ -1071,28 +1072,26 @@ const Demo = {
   },
   tick() {
     const T = nowS(), el = (T - this.t0) % 60, phase = el < 15 ? 0 : el < 30 ? 1 : el < 45 ? 2 : 3;
-    const w = (agent, n, state, task) => ({ id: `${agent}@farm/w${n}`, name: `w${n}`, state, task: task || null, at: T });
-    const task = (id, title, status, extra = {}) => ({ id, title, status, started: T - 600, updated: T, ...extra });
-    const tasks = { running: [], waiting: [], queued: [], done: [task("d1", "Set up CI", "done"), task("d2", "Fix flaky login test", "done")], failed: [] };
-    const run = (t) => (t.status === "running" ? tasks.running : t.status === "waiting" ? tasks.waiting : t.status === "queued" ? tasks.queued : tasks.done).push(t);
-    run(task("t1", "Add CSV export to the report page", phase < 2 ? "running" : "done"));
-    run(task("t2", "Refactor the importer", "waiting", { children: ["c1", "c2", "c3"] }));
-    run(task("c1", "Parse the header row", phase < 1 ? "running" : "done", { parent: "t2" }));
-    run(task("c2", "Stream rows in batches", "running", { parent: "t2" }));
-    run(task("c3", "Tests for quoted commas", phase < 1 ? "queued" : "running", { parent: "t2" }));
-    run(task("t3", "Write the API docs", "running"));
-    if (phase >= 2) run(task("t4", "Dark mode for the dashboard", "running"));
-    const agents = [
-      { id: "matan", name: "matan", hat: "straw", loggedIn: true, alive: true, workers: [
-        w("matan", 0, phase < 2 ? "running" : "idle", phase < 2 ? "t1" : null), w("matan", 1, "running", "c2"),
-        w("matan", 2, "throttled: pacing the week")] },
-      { id: "gil", name: "gil", hat: "beanie", loggedIn: true, alive: true, workers: [
-        w("gil", 0, "running", phase < 1 ? "c1" : "c3"), w("gil", 1, "running", "t3")] },
-    ];
-    if (phase >= 2) agents.push({ id: "noa", name: "noa", hat: "cap", loggedIn: true, alive: true, workers: [w("noa", 0, "running", "t4")] });
-    if (phase === 3) agents.push({ id: "egg", name: "new", hat: "straw", loggedIn: false, alive: true, workers: [] });
-    reconcile({ agents, tasks, counts: { queued: tasks.queued.length + 2 }, paused: false });
+    const sub = (id, title, owner, on, status, extra = {}) => ({ id, title, owner, on: status === "running" ? on : null, status, started: T - 600, created: T - 700, ...extra });
+    const subagents = [
+      sub("s1", "Add CSV export to the report page", "matan", "matan", phase < 2 ? "running" : "done"),
+      sub("s2", "Refactor the importer", "matan", "matan", "waiting", { children: ["c1", "c2", "c3"] }),
+      sub("c1", "Parse the header row", "matan", "gil", phase < 1 ? "running" : "done", { parent: "s2" }),
+      sub("c2", "Stream rows in batches", "matan", "gil", "running", { parent: "s2" }),
+      sub("c3", "Tests for quoted commas", "matan", "matan", phase < 1 ? "queued" : "running", { parent: "s2" }),
+      sub("s3", "Write the API docs", "gil", "gil", "running"),
+      ...(phase >= 2 ? [sub("s4", "Dark mode for the dashboard", "noa", "noa", "running")] : []),
+    ].filter(t => t.status !== "done");
+    const claude = (id, hat, extra = {}) => ({ id, name: id, hat, loggedIn: true, alive: true, up: true, ...extra });
+    const agents = [claude("matan", "straw", { primary: true }), claude("gil", "beanie")];
+    if (phase >= 2) agents.push(claude("noa", "cap"));
+    if (phase === 1) agents.push(claude("dana", "bow", { resting: true }));
+    if (phase === 3) agents.push({ id: "egg", name: "new", hat: "straw", loggedIn: false, alive: true });
+    const recent = [{ id: "d1", title: "Set up CI", status: "done" }, { id: "d2", title: "Fix flaky login test", status: "done" }];
+    reconcile({ agents, subagents, recent, paused: false });
+    Scene.boardCount = 3;
   },
 };
 
-if (document.body.dataset.page === "landing") Demo.start(); else UI.boot();
+const PAGE = document.body.dataset.page; // "diagram": scripts/architecture.html only borrows the sprites
+if (PAGE === "landing") Demo.start(); else if (PAGE !== "diagram") UI.boot();

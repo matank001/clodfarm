@@ -2,15 +2,14 @@
 """A stand-in for the `claude` binary that speaks the same stream-json protocol.
 
 Behaviour is driven by words in the prompt, so tests can script agents:
-  SPAWN <n>     add n sub-tasks with `clodfarm task add --parent $FARM_TASK_ID`
-  PLAN <n>      (planner) add n top-level tasks
+  SPAWN <n>     start n sub-agents with `clodfarm spawn` (children of $FARM_TASK_ID)
   COMMIT <name> write <name>.txt in the working directory and git-commit it
   REJECT        report a rejected rate limit and fail
   SLOW <s>      sleep s seconds before answering
   CACHE         leave an uncommitted __pycache__/cache.cpython-311.pyc behind, like a test run does
   FAIL          end with an error result whose text mentions a rate limit (it is not one)
   (resumed to fix a failing check: writes fixed.txt and commits it)
-FAKE_CHILD_SLOW=<s> makes SPAWNed sub-tasks take s seconds (for watching them in the farm UI).
+FAKE_CHILD_SLOW=<s> makes SPAWNed sub-agents take s seconds (for watching them in the farm UI).
 Utilization reported in each rate_limit_event comes from FAKE_UTIL_5H / FAKE_UTIL_7D.
 Every invocation is appended to $FAKE_CLAUDE_LOG (JSON lines) for assertions.
 """
@@ -82,17 +81,12 @@ def main(argv):
     if m:
         time.sleep(int(m.group(1)))
     text = "did the work"
-    resumed = "Your sub-tasks have finished" in prompt
+    resumed = "Your sub-agents have finished" in prompt
     m = re.search(r"SPAWN (\d+)", prompt)
     if m and not resumed:
         for i in range(int(m.group(1))):
-            farm_cli("task", "add", f"child {i}", "--prompt", f"COMMIT child{i}" + (f" SLOW {os.environ['FAKE_CHILD_SLOW']}" if os.environ.get("FAKE_CHILD_SLOW") else ""), "--parent", os.environ["FARM_TASK_ID"])
-        text = f"split into {m.group(1)} sub-tasks"
-    m = re.search(r"PLAN (\d+)", os.environ.get("FAKE_PLAN", "")) if "farm's planner" in prompt else None
-    if m:
-        for i in range(int(m.group(1))):
-            farm_cli("task", "add", f"planned {i}", "--prompt", f"COMMIT planned{i}")
-        text = f"planned {m.group(1)} tasks"
+            farm_cli("spawn", f"child {i}", "--prompt", f"COMMIT child{i}" + (f" SLOW {os.environ['FAKE_CHILD_SLOW']}" if os.environ.get("FAKE_CHILD_SLOW") else ""))
+        text = f"split into {m.group(1)} sub-agents"
     for name in re.findall(r"COMMIT (\w+)", prompt):
         with open(f"{name}.txt", "w") as f:
             f.write(name + "\n")
@@ -106,7 +100,7 @@ def main(argv):
     if resumed:
         for br in sorted(set(re.findall(r"branch (farm/\w+)", prompt))):
             subprocess.run(["git", "-c", "user.name=t", "-c", "user.email=t@t", "merge", "-q", "--no-edit", br], check=True)
-        text = "integrated the sub-task results"
+        text = "integrated the sub-agent results"
     out({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": text}],
                                           "usage": {"output_tokens": 42}}})
     out({"type": "result", "subtype": "success", "is_error": False, "session_id": session, "result": text,

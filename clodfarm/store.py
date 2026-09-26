@@ -11,8 +11,9 @@ Items (PK / SK):
     SLOT               / <seat>#<n>        concurrency slot n of that seat (lease, shared by its boxes)
     SPEND              / <seat>#<day>      API-mode list-price spend per seat and day
     WORKER             / <farm>/<worker>   heartbeat
-    SCHEDULE           / <id>              a scheduled task: queued again every time it is due
-    CONTROL            / GLOBAL | PLANNER | HEALTH
+    SCHEDULE           / <id>              a scheduled sub-agent: started again every time it is due
+    MSG#<claude>       / <ts>#<rand>       a message to one Claude on the farm (its inbox)
+    CONTROL            / GLOBAL | HEALTH
     EVENT#<yyyy-mm-dd> / <ts>#<rand>       event log (expires after 30 days)
 """
 
@@ -93,27 +94,28 @@ class Store:
 
     def add_task(self, title: str, prompt: str, priority: int = 5, parent: str | None = None,
                  kind: str = "task", created_by: str = "human", max_depth: int = 3, max_attempts: int = 3,
-                 to: str | None = None) -> dict:
-        """``to`` hands the task to one Claude on the farm (an agent's name, e.g. ``gil``): only its boxes take it."""
+                 to: str | None = None, owner: str | None = None) -> dict:
+        """A sub-agent run. ``owner`` is the Claude that started it (a sub-agent's own sub-agents inherit it), so the
+        farm shows it next to that Claude. ``to`` pins it to one Claude's account (e.g. ``gil``): only its boxes take
+        it. Without ``to`` any Claude with budget left runs it."""
         depth = 0
         if parent:
             p = self.get_task(parent)
             if not p:
                 raise ValueError(f"parent task {parent} not found")
             depth = int(p.get("depth", 0)) + 1
+            owner = p.get("owner") or owner
             if depth > max_depth:
-                raise ValueError(f"sub-task depth {depth} exceeds FARM_MAX_DEPTH={max_depth}; "
+                raise ValueError(f"sub-agent depth {depth} exceeds FARM_MAX_DEPTH={max_depth}; "
                                  "do the work yourself instead of splitting further")
         tid, t = new_id(), now()
         item = {"PK": f"TASK#{tid}", "SK": "META", "GSI1PK": "STATUS#queued", "GSI1SK": _prio_key(priority, t, tid),
                 "ver": 1, "id": tid, "title": title[:300], "prompt": prompt, "status": "queued", "priority": priority,
                 "kind": kind, "parent": parent, "depth": depth, "created": t, "updated": t, "created_by": created_by,
-                "attempts": 0, "max_attempts": max_attempts, "resumes": 0, "children_open": 0, "to": to or None}
+                "attempts": 0, "max_attempts": max_attempts, "resumes": 0, "children_open": 0, "to": to or None,
+                "owner": owner or None}
         item = {k: v for k, v in item.items() if v is not None}
         self.b.put(item, expect_ver=0)
-        spawner = os.environ.get("FARM_TASK_ID")
-        if spawner and created_by == spawner:  # lets the planner's back-off know whether it found work
-            self._update(*self._tkey(spawner), lambda x: {**x, "spawned": int(x.get("spawned", 0)) + 1})
         if parent:
             self._update(*self._tkey(parent), lambda x: {**x, "children_open": int(x.get("children_open", 0)) + 1,
                                                           "children": list(x.get("children") or []) + [tid]})
@@ -196,7 +198,7 @@ class Store:
     def finish(self, tid: str, worker: str, ok: bool, result: str, max_resumes: int) -> str:
         """Finish a run. Returns the task's new status.
 
-        A parent whose sub-tasks are still open goes to ``waiting``; it is re-queued
+        A parent whose sub-agents are still open goes to ``waiting``; it is re-queued
         (and resumed with their results) when the last one finishes."""
         mine = self._mine(worker)
         fields, drop = {"result": result[-8000:], "finished": now()}, ("lease_until", "worker")
@@ -211,12 +213,12 @@ class Store:
             return status
         if self._set_status(tid, "waiting", when=lambda x: mine(x) and int(x.get("children_open", 0)) > 0,
                             extra=fields, remove=drop):
-            self.event("task.waiting", f"{tid} waits for its sub-tasks", task=tid)
+            self.event("task.waiting", f"{tid} waits for its sub-agents", task=tid)
             return "waiting"
         task = self.get_task(tid) or {}
         if task.get("pending_review") and int(task.get("resumes", 0)) < max_resumes:
             self._set_status(tid, "queued", when=mine, extra={**fields, "resume": True}, remove=drop)
-            self.event("task.resume", f"{tid}: sub-tasks finished during the run; resuming", task=tid)
+            self.event("task.resume", f"{tid}: sub-agents finished during the run; resuming", task=tid)
             return "queued"
         self._set_status(tid, "done", when=mine, extra=fields, remove=drop)
         self.event("task.done", f"{tid} {task.get('title', '')[:120]}", task=tid)
@@ -232,7 +234,7 @@ class Store:
                                                           "pending_review": True})
         if p and int(p.get("children_open", 0)) <= 0 and p.get("status") == "waiting":
             if self._set_status(parent, "queued", when=lambda x: x.get("status") == "waiting", extra={"resume": True}):
-                self.event("task.resume", f"{parent}: all sub-tasks finished; resuming", task=parent)
+                self.event("task.resume", f"{parent}: all sub-agents finished; resuming", task=parent)
 
     def requeue_resume(self, tid: str, worker: str, reason: str, note: str, counter: str) -> bool:
         """Put a running task straight back in the queue to be resumed in its own session (to fix a failing
@@ -308,10 +310,27 @@ class Store:
             self.b.delete("WORKER", w["SK"])
         return n
 
+    # -------------------------------------------------------------- messages
+    def send_message(self, frm: str, to: str, text: str) -> dict:
+        t = now()
+        item = {"PK": f"MSG#{to}", "SK": f"{t:017.6f}#{secrets.token_hex(2)}", "ver": 1, "from": frm, "to": to,
+                "text": text[:4000], "at": t, "read": False, "expires_at": int(t + EVENT_TTL)}
+        self.b.put(item)
+        self.event("msg.sent", f"{frm} -> {to}: {text[:200]}", by=frm)
+        return item
+
+    def inbox(self, name: str, unread_only: bool = True, mark_read: bool = True) -> list[dict]:
+        out = [m for m in self.b.query(f"MSG#{name}") if not (unread_only and m.get("read"))]
+        if mark_read:
+            for m in out:
+                if not m.get("read"):
+                    self._update(m["PK"], m["SK"], lambda x: {**x, "read": True})
+        return out
+
     # ------------------------------------------------------------- schedules
     def add_schedule(self, title: str, prompt: str, *, cron: str | None = None, every: int | None = None,
                      at: float | None = None, tz: str = "UTC", to: str | None = None, priority: int = 5,
-                     created_by: str = "human") -> dict:
+                     created_by: str = "human", owner: str | None = None) -> dict:
         """Queue ``title`` on a schedule: a cron line (in ``tz``), every N seconds, or once ``at`` a time."""
         if sum(x is not None for x in (cron, every, at)) != 1:
             raise ValueError("give exactly one of cron, every or at")
@@ -322,7 +341,7 @@ class Store:
         sid = "s" + new_id()
         item = {"PK": "SCHEDULE", "SK": sid, "ver": 1, "id": sid, "title": title[:300], "prompt": prompt,
                 "priority": priority, "created_by": created_by, "created": now(), "next_at": first, "runs": 0,
-                **{k: v for k, v in {**spec, "to": to or None}.items() if v is not None}}
+                **{k: v for k, v in {**spec, "to": to or None, "owner": owner or None}.items() if v is not None}}
         self.b.put(item, expect_ver=0)
         self.event("schedule.added", f"{sid} {title[:120]}", by=created_by)
         return item
@@ -357,7 +376,7 @@ class Store:
                 continue
             task = self.add_task(it["title"], it["prompt"], priority=int(it.get("priority", 5)),
                                  created_by=f"schedule:{it['id']}", max_depth=max_depth,
-                                 max_attempts=max_attempts, to=it.get("to"))
+                                 max_attempts=max_attempts, to=it.get("to"), owner=it.get("owner"))
             out.append(task)
             if float(it["next_at"]) < 0:  # a one-off: done
                 self.b.delete("SCHEDULE", it["SK"])
@@ -439,23 +458,6 @@ class Store:
         it = self._update("CONTROL", "HEALTH", lambda x: {"failures": 0 if ok else int(x.get("failures", 0)) + 1},
                           create=True)
         return int(it["failures"])
-
-    def planner_try_start(self, cooldown: int) -> bool:
-        """Single-flight: only one planner run across all boxes per cooldown."""
-        t = now()
-        return self._update("CONTROL", "PLANNER", lambda x: None if float(x.get("next_allowed", 0)) >= t
-                            else {**x, "last_start": t, "next_allowed": t + cooldown}, create=True) is not None
-
-    def planner_backoff(self, added: int, cooldown: int, max_backoff: int):
-        """A planner that found nothing to do backs off exponentially."""
-        def fn(x):
-            idle = 0 if added else int(x.get("idle_runs", 0)) + 1
-            wait = min(cooldown * (2 ** idle), max_backoff) if idle else cooldown
-            return {**x, "idle_runs": idle, "next_allowed": now() + wait}
-        self._update("CONTROL", "PLANNER", fn, create=True)
-
-    def planner_state(self) -> dict:
-        return self.b.get("CONTROL", "PLANNER") or {}
 
     # --------------------------------------------------------- heartbeats/log
     def heartbeat(self, farm: str, worker: str, state: str, task: str | None = None, seat: str | None = None):

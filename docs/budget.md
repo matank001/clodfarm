@@ -71,4 +71,4 @@ worker on every box pauses until the reported reset time.
 | more parallelism | `FARM_MAX_WORKERS=6` (and a bigger box: about 400-600 MB RAM per agent) |
 
 `clodfarm budget --json` shows the snapshot, the decision and the reasoning. Every run also stores the utilization
-before and after it (`clodfarm task show ID`), so you can see what each task cost as a share of the window.
+before and after it (`clodfarm result ID`), so you can see what each sub-agent cost as a share of the window.

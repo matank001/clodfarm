@@ -47,7 +47,7 @@ def test_a_rate_limited_seat_stops_while_the_other_keeps_working(env, store):
         t0 = time.time()
         a[0].store.put_snapshot(Snapshot(observed_at=t0, status="rejected", rate_limit_type="five_hour",
                                          resets_at=t0 + 3600), "matan-aaaa")
-        ids = [__import__("json").loads(cli("task", "add", f"t{i}", "--prompt", f"COMMIT m{i}", "--json").stdout)["id"]
+        ids = [__import__("json").loads(cli("spawn", f"t{i}", "--prompt", f"COMMIT m{i}", "--json").stdout)["id"]
                for i in range(3)]
         wait_for(lambda: all(a[0].store.get_task(i)["status"] == "done" for i in ids), timeout=90)
         homes = {a[0].store.get_task(i)["home"] for i in ids}
@@ -65,7 +65,7 @@ def test_parent_and_children_across_two_seats_land_through_origin(env, store):
     a = start_box(env, origin, "boxA", "matan-aaaa")
     b = start_box(env, origin, "boxB", "gil-bbbb")
     try:
-        tid = __import__("json").loads(cli("task", "add", "big", "--prompt", "SPAWN 3", "--json").stdout)["id"]
+        tid = __import__("json").loads(cli("spawn", "big", "--prompt", "SPAWN 3", "--json").stdout)["id"]
         wait_for(lambda: a[0].store.get_task(tid)["status"] in ("done", "failed"), timeout=120)
         task = a[0].store.get_task(tid)
         assert task["status"] == "done", task["result"][-600:]

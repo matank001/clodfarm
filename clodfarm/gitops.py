@@ -4,7 +4,7 @@ Top-level tasks branch from main. When one finishes, its branch is rebased onto
 main and fast-forwarded in, so main only moves forward; with an ``origin``, main
 is pushed after each merge.
 
-Sub-tasks branch from their parent's branch and never touch main. Their branches
+Sub-agents branch from their parent's branch and never touch main. Their branches
 are left for the parent, which is resumed and merges them itself (it is an agent:
 it resolves conflicts with the intent of both sides in view). Branches that main
 already contains are deleted when a top-level task lands.
@@ -96,19 +96,6 @@ def ensure_excludes(repo: str):
             f.write(("\n" if cur and not cur.endswith("\n") else "") + _EXCLUDE_MARK + "\n" + DEFAULT_EXCLUDES)
 
 
-def write_mission(repo: str, text: str) -> str:
-    """Write MISSION.md at the repo root and commit it on main (so every worktree sees it)."""
-    path = os.path.join(repo, "MISSION.md")
-    with open(path, "w") as f:
-        f.write(text.rstrip() + "\n")
-    if is_repo(repo):
-        git(repo, "add", "MISSION.md")
-        if git(repo, "status", "--porcelain", "MISSION.md", check=False):
-            git(repo, "-c", "user.name=clodfarm", "-c", "user.email=clodfarm@localhost", "commit", "-qm",
-                "mission: update MISSION.md", check=False)
-    return path
-
-
 def fetch_branch(repo: str, branch: str) -> bool:
     """Get a task branch another box pushed (several boxes share work through origin). Never fails the caller."""
     if not has_origin(repo):
@@ -142,7 +129,7 @@ def ensure_repo(repo: str, url: str | None):
         os.makedirs(repo, exist_ok=True)
         git(repo, "init", "-q", "-b", "main")
         with open(os.path.join(repo, "README.md"), "w") as f:
-            f.write("# workspace\n\nManaged by clodfarm. Put your MISSION.md here.\n")
+            f.write("# workspace\n\nManaged by clodfarm: the Claudes on this farm share this repo.\n")
         git(repo, "add", "-A")
         git(repo, "-c", "user.name=clodfarm", "-c", "user.email=clodfarm@localhost",
             "commit", "-qm", "init workspace")
@@ -151,7 +138,7 @@ def ensure_repo(repo: str, url: str | None):
 
 def worktree_for(repo: str, task_id: str, base: str | None = None) -> tuple[str, str]:
     """Create (or reuse, for a resumed task) the task's worktree, branched from ``base``
-    (the parent's branch for a sub-task) or from main."""
+    (the parent's branch for a sub-agent) or from main."""
     path = os.path.join(os.path.dirname(repo), ".worktrees", task_id)
     branch = f"farm/{task_id}"
     if os.path.isdir(path):

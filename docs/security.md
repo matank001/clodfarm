@@ -22,7 +22,7 @@ clodfarm gives autonomous agents a shell. Be deliberate about what that shell ca
      denied (nobody is there to answer).
    - `acceptEdits` or `dontAsk`, combined with `permissions.allow` / `deny` rules in
      `/home/farm/.claude/settings.json`.
-4. **Network egress:** the agents need `api.anthropic.com`, `claude.ai`, your git host and whatever your mission
+4. **Network egress:** the agents need `api.anthropic.com`, `claude.ai`, your git host and whatever your work
    needs. Tighten the rest with a firewall or an egress proxy if the work is sensitive.
 5. **Review before trusting.** With `FARM_PUSH=1` the farm pushes `main`. Point it at a branch-protected repo
    that requires review, or at a fork, if unreviewed code on main is unacceptable.
@@ -35,7 +35,7 @@ clodfarm gives autonomous agents a shell. Be deliberate about what that shell ca
   plan type, the email.
 - The only network calls it makes itself go to DynamoDB. Everything else is Claude Code and the agents.
 - It doesn't send messages, spend money, post publicly or create accounts. The guide tells agents not to either,
-  unless your `MISSION.md` explicitly says so.
+  unless the person they work for explicitly asks.
 
 ## Reporting a vulnerability
 

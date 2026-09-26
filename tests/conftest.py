@@ -60,7 +60,7 @@ def env(tmp_path, backend, request, monkeypatch):
         "CLAUDE_CONFIG_DIR": str(tmp_path / "claude-home"),
         "FAKE_CLAUDE_LOG": str(tmp_path / "claude.log"),
         "FARM_IDLE_SLEEP": "1",
-        "FARM_PLANNER": "0",
+        "FARM_USAGE_REFRESH": "0",
         "FARM_PUSH": "0",
         "FARM_MAX_WORKERS": "3",
         "FARM_NAME": "test",
