@@ -1,6 +1,7 @@
 """End to end: the real supervisor, store and git flow, with a fake `claude` binary."""
 import json
 import os
+import sys
 import subprocess
 import threading
 import time
@@ -276,13 +277,17 @@ def test_a_new_claude_measures_its_usage_at_once_and_reads_its_messages(env, mon
         assert abs(snap.five_hour.utilization - 0.42) < 1e-6  # no sub-agent ran: the usage keeper measured it
         assert any(e["type"] == "usage.measured" for e in farm.store.events(time.time() - 60))
         settings = json.load(open(env / "claude-home" / "settings.json"))
-        assert "clodfarm inbox --hook" in json.dumps(settings["hooks"]["UserPromptSubmit"])
+        for event in ("SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"):
+            assert "clodfarm hook" in json.dumps(settings["hooks"][event])
         assert cli("msg", "gil", "hi", check=False).returncode == 2  # gil isn't on this farm
         farm.store.send_message("gil", "test", "please review the importer")
-        out = cli("inbox", "--hook").stdout
+        hook = lambda ev, **env: subprocess.run([sys.executable, "-m", "clodfarm", "hook"], input=json.dumps(  # noqa: E731
+            {"hook_event_name": ev, "session_id": "s-1"}), capture_output=True, text=True, env={**os.environ, **env}).stdout
+        assert hook("SessionStart") == ""  # only a real prompt gets the messages
+        assert hook("UserPromptSubmit", FARM_TASK_ID="x") == ""  # never inside a sub-agent
+        out = hook("UserPromptSubmit")
         assert "from gil" in out and "please review the importer" in out
-        assert cli("inbox", "--hook").stdout == ""  # delivered once
-        assert cli("inbox", "--hook", extra_env={"FARM_TASK_ID": "x"}).stdout == ""  # never inside a sub-agent
+        assert hook("UserPromptSubmit") == ""  # delivered once
         assert "5h 58% left" in cli("agents").stdout
     finally:
         stop_farm(farm, t)
@@ -300,3 +305,42 @@ def test_every_farm_session_is_marked_clodfarm(env):
         assert run[run.index("--name") + 1] == "[clodfarm] test · name me"
     finally:
         stop_farm(farm, t)
+
+
+def test_every_session_and_its_whole_conversation_is_recorded(env, tmp_path):
+    transcript = tmp_path / "t.jsonl"
+    lines = [
+        {"type": "bridge-session", "sessionId": "abc", "bridgeSessionId": "session_01RC"},
+        {"type": "user", "isMeta": True, "message": {"role": "user", "content": "<local-command-caveat>x"}},
+        {"type": "user", "message": {"role": "user", "content": "refactor the importer"}, "timestamp": "t1"},
+        {"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "thinking", "thinking": "secret"}, {"type": "text", "text": "On it."},
+            {"type": "tool_use", "name": "Bash", "input": {"command": "clodfarm spawn parse"}}]}},
+        {"type": "user", "message": {"role": "user", "content": [{"type": "tool_result", "content": "started sub-agent 1"}]}},
+        {"type": "ai-title", "aiTitle": "Refactor the importer"},
+    ]
+    Store.from_config(load()).ensure_table()
+    transcript.write_text("".join(json.dumps(x) + "\n" for x in lines[:3]))
+    hook = lambda ev, **env_: subprocess.run([sys.executable, "-m", "clodfarm", "hook"], input=json.dumps(  # noqa: E731
+        {"hook_event_name": ev, "session_id": "abc", "transcript_path": str(transcript), "cwd": "/w"}),
+        capture_output=True, text=True, env={**os.environ, **env_}, check=True)
+    hook("SessionStart")
+    with open(transcript, "a") as f:  # Claude Code keeps writing; a half-written line waits for the next call
+        f.write("".join(json.dumps(x) + "\n" for x in lines[3:]) + '{"type": "user", "mess')
+    hook("Stop")
+    hook("Stop")  # again: nothing new, nothing copied twice
+    store = Store.from_config(load())
+    s = store.session("abc")
+    assert s["kind"] == "conversation" and s["claude"] == "test" and s["title"] == "Refactor the importer"
+    assert s["remote_session"] == "session_01RC" and s["turns"] == 4
+    turns = store.turns("abc")
+    assert [(t["role"], t["kind"]) for t in turns] == [("user", "text"), ("assistant", "text"), ("assistant", "tool"),
+                                                     ("user", "tool_result")]
+    assert turns[0]["text"] == "refactor the importer" and "clodfarm spawn parse" in turns[2]["text"]
+    assert "secret" not in json.dumps(turns)  # thinking is not the conversation
+    out = cli("session", "abc").stdout
+    assert "YOU: refactor the importer" in out and "TOOL [tool_result]: started sub-agent 1" in out
+    assert "abc" in cli("sessions").stdout
+    hook("SessionEnd", FARM_TASK_ID="t9", FARM_OWNER="gil")  # the same hook inside a sub-agent run
+    s = store.session("abc")
+    assert s["ended"] and s["kind"] == "sub-agent" and s["claude"] == "gil" and s["task"] == "t9"

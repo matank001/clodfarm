@@ -42,6 +42,8 @@ container (user "farm", tini as PID 1)
 | `SPEND` | `<seat>#<day>` | API-mode list-price spend per seat and day. |
 | `CONTROL` | `GLOBAL` / `HEALTH` | The pause switch; the circuit breaker's failure count. |
 | `MSG#<claude>` | `<ts>#<rand>` | A message to one Claude (its inbox; TTL 30 days). |
+| `SESSION` | `<session id>` | Every Claude Code session: its Claude, kind (conversation / sub-agent / usage), task, title, turn count, transcript offset. |
+| `TURN#<session id>` | `<n>` | One turn of that session's conversation, copied from its transcript by `clodfarm hook`. |
 | `SCHEDULE` | `<id>` | A scheduled task (cron + time zone, every N seconds, or once at a time) and its next run. |
 | `WORKER` | `<farm>/<worker>` | Heartbeats (TTL 1 day). |
 | `EVENT#<day>` | `<ts>#<rand>` | Event log (TTL 30 days). |

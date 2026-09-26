@@ -13,6 +13,8 @@ Items (PK / SK):
     WORKER             / <farm>/<worker>   heartbeat
     SCHEDULE           / <id>              a scheduled sub-agent: started again every time it is due
     MSG#<claude>       / <ts>#<rand>       a message to one Claude on the farm (its inbox)
+    SESSION            / <session id>      a Claude Code session: which Claude, what kind, its task, title, turns
+    TURN#<session id>  / <n>               one turn of its conversation (see sessions.py)
     CONTROL            / GLOBAL | HEALTH
     EVENT#<yyyy-mm-dd> / <ts>#<rand>       event log (expires after 30 days)
 """
@@ -326,6 +328,47 @@ class Store:
                 if not m.get("read"):
                     self._update(m["PK"], m["SK"], lambda x: {**x, "read": True})
         return out
+
+    # -------------------------------------------------------------- sessions
+    def record_session(self, sid: str, transcript: str | None = None, turns: list[dict] | None = None,
+                       **fields) -> dict | None:
+        """Register (or update) a session and append its conversation: the ``transcript`` lines written since the last
+        call (tracked by byte offset, claimed atomically so two hooks never copy a turn twice) and/or ``turns``."""
+        from .sessions import read_transcript
+        t, got = now(), {}
+
+        def fn(x):
+            if not x:
+                x = {"id": sid, "started": t, "turns": 0, "offset": 0}
+            new = list(turns or [])
+            if transcript:
+                read, off, meta = read_transcript(transcript, int(x.get("offset", 0)))
+                new += read
+                x.update(offset=off, transcript=transcript)
+                x.update({k: v for k, v in meta.items() if v})
+            x.update({k: v for k, v in fields.items() if v is not None}, last_at=t)
+            if not x.get("title"):
+                first = next((n["text"] for n in new if n["role"] == "user" and n["kind"] == "text"), "")
+                if first:
+                    x["title"] = first.strip().splitlines()[0][:120]
+            got["first"], got["turns"] = int(x.get("turns", 0)), new
+            x["turns"] = got["first"] + len(new)
+            return x
+        it = self._update("SESSION", sid, fn, create=True)
+        for n, turn in enumerate(got["turns"]):
+            self.b.put({"PK": f"TURN#{sid}", "SK": f"{got['first'] + n:06d}", "ver": 1,
+                        **{k: v for k, v in turn.items() if v is not None}})
+        return it
+
+    def sessions(self, claude: str | None = None, limit: int = 100) -> list[dict]:
+        out = sorted(self.b.query("SESSION"), key=lambda x: -float(x.get("last_at", 0)))
+        return [s for s in out if not claude or s.get("claude") == claude][:limit]
+
+    def session(self, sid: str) -> dict | None:
+        return self.b.get("SESSION", sid)
+
+    def turns(self, sid: str) -> list[dict]:
+        return self.b.query(f"TURN#{sid}")
 
     # ------------------------------------------------------------- schedules
     def add_schedule(self, title: str, prompt: str, *, cron: str | None = None, every: int | None = None,

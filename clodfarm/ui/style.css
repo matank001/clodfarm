@@ -166,6 +166,14 @@ output { color: var(--clay-2); }
 .talk-hint strong { font-weight: 400; color: var(--clay-2); }
 .talk-hint:hover { background: #fff; }
 
+.talk { display: flex; flex-direction: column; gap: 10px; }
+.turn { max-width: 88%; align-self: flex-start; padding: 8px 12px 10px; border: 3px solid var(--ink); border-radius: 8px; background: #fff; white-space: pre-wrap; overflow-wrap: anywhere; }
+.turn b { display: block; font: 8px/1.6 var(--font-px); font-weight: 400; color: var(--clay-2); margin-bottom: 2px; }
+.turn.user { align-self: flex-end; background: #fde6df; }
+.turn.k-tool, .turn.k-tool_result { font-size: 18px; color: var(--ink-2); background: var(--paper-2); border-style: dashed; }
+.turn.k-tool_result { align-self: flex-end; }
+.sessions .subs li a { color: var(--ink); }
+
 /* ------------------------------------------------------------ world overlays */
 .bubble {
   position: absolute; left: 0; top: 0; transform-origin: 50% 100%;

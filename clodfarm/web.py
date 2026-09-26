@@ -28,6 +28,7 @@ import time
 from http import HTTPStatus
 from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import parse_qs, urlsplit
 
 from . import __version__
 from .agents import AgentManager
@@ -357,6 +358,19 @@ def make_handler(ui: FarmUI):
                     return self._err(401, "log in first")
                 if path == "/api/state":
                     return self._json(ui.state())
+                if path == "/api/sessions":  # every Claude session on the farm, newest first
+                    q = {k: v[-1] for k, v in parse_qs(urlsplit(self.path).query).items()}
+                    keep = ("id", "claude", "runs_on", "kind", "task", "title", "turns", "started", "last_at", "ended")
+                    return self._json([{k: s.get(k) for k in keep} for s in ui.store.sessions(q.get("claude"), 50)])
+                m = re.fullmatch(r"/api/sessions/([A-Za-z0-9-]+)", path)
+                if m:  # one session's whole conversation
+                    s = ui.store.session(m.group(1))
+                    if not s:
+                        return self._err(404, "no such session")
+                    return self._json({"id": s["id"], "claude": s.get("claude"), "kind": s.get("kind"),
+                                       "title": s.get("title"), "task": s.get("task"), "started": s.get("started"),
+                                       "conversation": [{k: t.get(k) for k in ("role", "kind", "text", "at")}
+                                                        for t in ui.store.turns(s["id"])]})
                 m = re.fullmatch(r"/api/agents/([a-z0-9@._-]+)/login", path)
                 if m:
                     s = ui.manager.login(m.group(1))

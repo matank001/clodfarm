@@ -118,20 +118,27 @@ def install_guide():
         _atomic_write(path, new)
 
 
-HOOK_CMD = "clodfarm inbox --hook"
+HOOK_CMD = "clodfarm hook"
+_OLD_HOOKS = ("clodfarm inbox --hook",)
+HOOK_EVENTS = ("SessionStart", "UserPromptSubmit", "Stop", "SessionEnd")
 
 
 def install_hooks():
-    """Show a Claude the messages other Claudes sent it: a hook in its Claude Code settings runs `clodfarm inbox --hook`
-    when a conversation starts and before each prompt; it prints new messages (nothing when there are none) and
-    Claude Code adds them to the conversation. Other settings and hooks are kept."""
+    """Put `clodfarm hook` in this Claude's Claude Code settings for every session event: it records each session and
+    its whole conversation in the farm's store, and shows a conversation (at its next prompt) the messages other
+    Claudes sent it.
+    Other settings and hooks are kept."""
     path = os.path.join(claude_home(), "settings.json")
     try:
         cfg = json.load(open(path))
     except (OSError, ValueError):
         cfg = {}
     hooks, changed = cfg.setdefault("hooks", {}), False
-    for event in ("SessionStart", "UserPromptSubmit"):
+    for event in list(hooks):  # the hook of older versions
+        kept = [g for g in hooks[event] if not any(h.get("command") in _OLD_HOOKS for h in g.get("hooks", []))]
+        changed |= len(kept) != len(hooks[event])
+        hooks[event] = kept
+    for event in HOOK_EVENTS:
         groups = hooks.setdefault(event, [])
         if not any(h.get("command") == HOOK_CMD for g in groups for h in g.get("hooks", [])):
             groups.append({"hooks": [{"type": "command", "command": HOOK_CMD, "timeout": 15}]})

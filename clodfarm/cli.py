@@ -336,18 +336,66 @@ def cmd_msg(cfg, a):
     return 0
 
 
-def cmd_inbox(cfg, a):
-    if a.hook:  # from the Claude Code hook: only in conversations with this Claude, never fail the prompt
-        if os.environ.get("FARM_TASK_ID"):
-            return 0
-        try:
-            msgs = _store(cfg).inbox(cfg.name)
-        except Exception:  # noqa: BLE001
-            return 0
-        if msgs:
-            print("New messages from other Claudes on this farm (reply with `clodfarm msg <name> \"...\"`):\n" + "\n".join(
-                f"- from {m['from']} at {iso(m['at'])[11:16]}Z: {m['text']}" for m in msgs))
+def cmd_hook(cfg, a):
+    """Called by Claude Code (the hook the farm installs) on SessionStart, UserPromptSubmit, Stop and SessionEnd,
+    with the event as JSON on stdin. Registers the session and copies its new turns into the store; in a
+    conversation it also prints new messages from the other Claudes, which Claude Code adds to the conversation.
+    It never fails the session: any problem is reported on stderr and it exits 0."""
+    from .sessions import session_kind
+    try:
+        ev = json.loads(sys.stdin.read() or "{}")
+    except ValueError:
+        ev = {}
+    name, sid = ev.get("hook_event_name", ""), ev.get("session_id")
+    kind = session_kind()
+    try:
+        store = _store(cfg)
+        if sid:
+            owner = os.environ.get("FARM_OWNER") if kind != "conversation" else None  # a sub-agent's Claude
+            store.record_session(sid, transcript=ev.get("transcript_path"), claude=owner or cfg.name, runs_on=cfg.name, kind=kind, box=cfg.farm_id, cwd=ev.get("cwd"),
+                                 task=os.environ.get("FARM_TASK_ID") if kind == "sub-agent" else None,
+                                 ended=True if name == "SessionEnd" else None,
+                                 end_reason=ev.get("reason") if name == "SessionEnd" else None)
+        if kind == "conversation" and name == "UserPromptSubmit":  # a real prompt: a session that never gets one
+            # (aborted, or only opened) must not use the messages up
+            msgs = store.inbox(cfg.name)
+            if msgs:
+                print("New messages from other Claudes on this farm (reply with `clodfarm msg <name> \"...\"`):\n"
+                      + "\n".join(f"- from {m['from']} at {iso(m['at'])[11:16]}Z: {m['text']}" for m in msgs))
+    except Exception as e:  # noqa: BLE001
+        print(f"clodfarm hook: {e!r}"[:300], file=sys.stderr)
+    return 0
+
+
+def cmd_sessions(cfg, a):
+    rows = _store(cfg).sessions(a.claude, a.n)
+    _out(rows, a.json, "\n".join(
+        f"  {r['id'][:8]}  {r.get('kind', '?'):<12} {r.get('claude', '?'):<12} {_ago(r.get('last_at')):>5}  "
+        f"{r.get('turns', 0):>4} turns  {'ended ' if r.get('ended') else ''}{(r.get('title') or '')[:60]}" for r in rows)
+         or "(no sessions recorded yet)")
+    return 0
+
+
+def cmd_session(cfg, a):
+    store = _store(cfg)
+    s = store.session(a.id) or next((x for x in store.sessions(limit=1000) if x["id"].startswith(a.id)), None)
+    if not s:
+        print("no such session", file=sys.stderr)
+        return 1
+    turns = store.turns(s["id"])
+    if a.json:
+        _out({**s, "conversation": turns}, True, "")
         return 0
+    print(f"{s['id']}  {s.get('kind')}  {s.get('claude')}  {len(turns)} turns  {s.get('title') or ''}")
+    for t in turns:
+        who = "TOOL" if t["kind"] == "tool_result" else \
+            {"user": "YOU" if s.get("kind") == "conversation" else "FARM", "assistant": "CLAUDE"}.get(t["role"], t["role"])
+        tag = "" if t["kind"] == "text" else f" [{t['kind']}]"
+        print(f"\n{who}{tag}: {t['text']}")
+    return 0
+
+
+def cmd_inbox(cfg, a):
     msgs = _store(cfg).inbox(cfg.name, unread_only=not a.all, mark_read=not a.peek)
     _out(msgs, a.json, "\n".join(f"  {iso(m['at'])[5:16].replace('T', ' ')}  from {m['from']}: {m['text']}" for m in msgs)
          or "(no new messages)")
@@ -524,7 +572,12 @@ def main(argv=None):
     ib = add("inbox", cmd_inbox, "messages other Claudes sent you")
     ib.add_argument("--all", action="store_true", help="also the ones already read")
     ib.add_argument("--peek", action="store_true", help="don't mark them read")
-    ib.add_argument("--hook", action="store_true", help=argparse.SUPPRESS)
+    add("hook", cmd_hook, argparse.SUPPRESS)
+    ss = add("sessions", cmd_sessions, "every Claude session on the farm (conversations and sub-agents)")
+    ss.add_argument("--claude", help="only this Claude's")
+    ss.add_argument("-n", type=int, default=30)
+    se = add("session", cmd_session, "one session's whole conversation")
+    se.add_argument("id")
     add("agents", cmd_agents, "the Claudes on this farm and the budget each has left")
     sc = add("schedule", cmd_schedule, "start a sub-agent on a schedule")
     scs = sc.add_subparsers(dest="sub", required=True)

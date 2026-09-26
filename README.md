@@ -261,6 +261,7 @@ Details and caveats: [docs/auth.md](docs/auth.md).
 | `clodfarm spawn TITLE --prompt ... [--on NAME]` | start a sub-agent (the Claudes use the same command) |
 | `clodfarm subagents [--all]` · `result ID [--wait]` · `cancel ID` · `retry ID` | follow and manage sub-agents |
 | `clodfarm msg NAME TEXT` · `inbox` | messages between the Claudes |
+| `clodfarm sessions` · `session ID` | every Claude session on the farm, and its whole conversation |
 | `clodfarm schedule add TITLE (--cron ... [--tz ...] \| --every 2h \| --at ...)` / `list` / `remove ID` | scheduled tasks |
 | `clodfarm events [-f]` | the event log: sub-agents, merges, checks, messages, pauses, limits |
 | `clodfarm pause [reason]` / `resume` | stop and restart new sub-agents on every box |

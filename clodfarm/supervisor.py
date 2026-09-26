@@ -341,6 +341,9 @@ class Farm:
         })
         if res.session_id:
             store.update_task(tid, session_id=res.session_id, cwd=cwd, branch=branch, home=cfg.farm_id, seat=self.seat)
+            # the hook records its conversation; this makes sure the session is registered even without the hook
+            store.record_session(res.session_id, claude=task.get("owner") or cfg.name, runs_on=cfg.name,
+                                 kind="sub-agent", task=tid, box=cfg.farm_id, cwd=cwd, title=task["title"][:120])
 
         if res.rate_limited and not res.ok:
             # not the task's fault: give the attempt back and wait for the window

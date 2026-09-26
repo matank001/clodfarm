@@ -211,3 +211,18 @@ def test_state_is_claudes_and_their_sub_agents(ui):
     subs = {t["title"]: t for t in st["subagents"]}
     assert subs["refactor"]["owner"] == me and subs["refactor"]["on"] == me
     assert subs["part 1"]["owner"] == me and subs["part 1"]["to"] == "gil" and subs["part 1"]["status"] == "queued"
+
+
+def test_sessions_and_conversations_in_the_ui(ui):
+    base, farm_ui = ui
+    call = client()
+    login(call, base)
+    farm_ui.store.record_session("s1", claude="gil", kind="conversation", title="review the importer",
+                                 turns=[{"role": "user", "kind": "text", "text": "review it"},
+                                        {"role": "assistant", "kind": "text", "text": "done"}])
+    rows = call(base + "/api/sessions?claude=gil")[1]
+    assert [r["id"] for r in rows] == ["s1"] and rows[0]["turns"] == 2
+    assert call(base + "/api/sessions?claude=nobody")[1] == []
+    s = call(base + "/api/sessions/s1")[1]
+    assert [t["text"] for t in s["conversation"]] == ["review it", "done"]
+    assert call(base + "/api/sessions/nope")[0] == 404

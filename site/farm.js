@@ -937,6 +937,7 @@ const UI = {
         parent ? [h("dt", { text: "HELPING" }), h("dd", { text: parent.title })] : null),
         h("h3", { text: "ITS JOB" }), h("p", { class: "job-text", text: t.title }),
         kids.length ? [h("h3", { text: `ITS SUB-AGENTS (${kids.length})` }), h("ul", { class: "subs" }, kids.map(k => h("li", {}, badge(k), h("span", { text: k.title }))))] : null,
+        h("h3", { text: "ITS SESSION" }), this.sessionList(c.agent.id, t.id),
         h("p", { class: "muted small", text: `Its result: ask ${c.agent.name}, or run clodfarm result ${t.id}` })];
       fill($("#sum-body"), parts); fill($("#sum-actions"));
       return;
@@ -957,6 +958,7 @@ const UI = {
         : "Measuring its usage…" }));
     if (mine.length) parts.push(h("h3", { text: `ITS SUB-AGENTS (${mine.length})` }), h("ul", { class: "subs" }, mine.map(t => h("li", {}, badge(t),
       h("span", { text: t.title + (t.on && t.on !== a.id ? ` · on ${t.on}` : "") })))));
+    parts.push(h("h3", { text: "SESSIONS" }), this.sessionList(a.id));
     if (elsewhere.length) parts.push(h("h3", { text: `HELPING OTHERS (${elsewhere.length})` }), h("ul", { class: "subs" }, elsewhere.map(t => h("li", {}, badge(t),
       h("span", { text: `${t.title} · for ${t.owner}` })))));
     fill($("#sum-body"), parts);
@@ -972,6 +974,39 @@ const UI = {
       acts.push(rel);
     }
     fill($("#sum-actions"), acts);
+  },
+
+  // ---------------------------------------------------------------- sessions
+  /** A Claude's sessions (conversations, sub-agent runs), every one recorded in the farm's store by its hook. */
+  sessionList(claude, task) {
+    const box = h("div", { class: "sessions" }), key = claude + "|" + (task || "");
+    const draw = (rows) => {
+      rows = rows.filter(s => task ? s.task === task : s.kind !== "usage");
+      if (!rows.length) return fill(box, h("p", { class: "muted small", text: task ? "Its session is recorded once it starts." : "No sessions recorded yet. Talk to it in the Claude app: every conversation shows up here." }));
+      fill(box, h("ul", { class: "subs" }, rows.slice(0, 8).map(s => h("li", {},
+        h("span", { class: `badge ${s.kind === "conversation" ? "done" : "running"}`, text: s.kind === "conversation" ? "TALK" : "SUB-AGENT" }),
+        h("a", { href: "#", onclick: (e) => { e.preventDefault(); this.openSession(s.id, this.summaryKey); } }, (s.title || "(untitled)").slice(0, 70)),
+        h("span", { class: "muted", text: ` · ${s.turns || 0} turns · ${ago(s.last_at)}` })))));
+    };
+    const hit = this.sessCache?.[key];
+    if (hit) draw(hit.rows);
+    if (!hit || Date.now() - hit.at > 8000) api(`api/sessions?claude=${encodeURIComponent(claude)}`).then(rows => {
+      this.sessCache = { ...(this.sessCache || {}), [key]: { at: Date.now(), rows } }; draw(rows);
+    }).catch(() => {});
+    return box;
+  },
+  async openSession(id, back) {
+    for (const d of $$("dialog[open]")) d.close();
+    $("#talk-kicker").textContent = "SESSION"; $("#talk-h").textContent = "…"; fill($("#talk-body"), h("p", { class: "muted", text: "Loading…" }));
+    fill($("#talk-actions"), back ? h("button", { class: "btn", type: "button", onclick: () => { const c = Scene.critters.get(back); if (c) this.openCritter(c); } }, "◀ BACK") : null);
+    $("#dlg-talk").showModal();
+    let s;
+    try { s = await api(`api/sessions/${id}`); } catch (x) { fill($("#talk-body"), h("p", { class: "form-error", text: x.message })); return; }
+    $("#talk-kicker").textContent = `${s.kind === "conversation" ? "CONVERSATION" : "SUB-AGENT SESSION"} · ${String(s.claude || "").toUpperCase()} · ${ago(s.started)}`;
+    $("#talk-h").textContent = (s.title || "(untitled)").slice(0, 90);
+    const who = (t) => t.kind === "tool_result" ? "TOOL" : t.role === "assistant" ? String(s.claude || "CLAUDE").toUpperCase() : s.kind === "conversation" ? "YOU" : "THE FARM";
+    fill($("#talk-body"), s.conversation.length ? s.conversation.map(t => h("div", { class: `turn ${t.role} k-${t.kind}` },
+      h("b", { text: who(t) + (t.kind === "tool" ? " · TOOL CALL" : "") }), h("div", { text: t.text }))) : h("p", { class: "muted", text: "Nothing said yet." }));
   },
 
   // ----------------------------------------------------------------- hatching
