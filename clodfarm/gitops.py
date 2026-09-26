@@ -12,11 +12,32 @@ already contains are deleted when a top-level task lands.
 
 from __future__ import annotations
 
+import contextlib
+import fcntl
 import os
 import subprocess
 import threading
 
-_lock = threading.Lock()  # one merge at a time per farm
+_tlock = threading.Lock()
+
+
+@contextlib.contextmanager
+def _locked(repo: str):
+    """One git change at a time per box: across this process's threads, and across the agent processes that share
+    the repo (each agent you add in the farm UI is its own `clodfarm run`)."""
+    with _tlock:
+        path = os.path.join(repo, ".git", "clodfarm.lock")
+        try:
+            f = open(path, "a")
+        except OSError:  # no .git yet: the thread lock alone
+            yield
+            return
+        with f:
+            fcntl.flock(f, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
 
 # Build artifacts and caches that must never be committed by the end-of-run auto-commit. Committed caches turn into
 # "untracked working tree files would be overwritten" the next time a test run regenerates them.
@@ -135,7 +156,7 @@ def worktree_for(repo: str, task_id: str, base: str | None = None) -> tuple[str,
     branch = f"farm/{task_id}"
     if os.path.isdir(path):
         return path, branch
-    with _lock:
+    with _locked(repo):
         # on a multi-box farm the base (parent's branch) or this task's own branch may live on another box
         if not git(repo, "branch", "--list", branch):
             fetch_branch(repo, branch)
@@ -192,7 +213,7 @@ def run_check(path: str, cmd: str, timeout: int) -> tuple[bool, str]:
 
 def merge(repo: str, path: str, branch: str, push: bool = True) -> str:
     """Rebase the task branch onto main and fast-forward main. Returns a summary."""
-    with _lock:
+    with _locked(repo):
         base = main_branch(repo)
         commit_leftovers(path, branch)
         ahead = git(repo, "rev-list", "--count", f"{base}..{branch}")
@@ -215,7 +236,7 @@ def merge(repo: str, path: str, branch: str, push: bool = True) -> str:
 
 def remove_worktree(repo: str, path: str, branch: str | None = None):
     """Remove a finished task's worktree; delete its branch too when given."""
-    with _lock:
+    with _locked(repo):
         git(repo, "worktree", "remove", "--force", path, check=False)
         if branch:
             git(repo, "branch", "-D", branch, check=False)
@@ -223,7 +244,7 @@ def remove_worktree(repo: str, path: str, branch: str | None = None):
 
 def prune_merged(repo: str) -> int:
     """Delete clodfarm/* branches that main already contains and that no worktree uses."""
-    with _lock:
+    with _locked(repo):
         base = main_branch(repo)
         used = {l.split()[1].replace("refs/heads/", "") for l in git(repo, "worktree", "list", "--porcelain",
                 check=False).splitlines() if l.startswith("branch ")}

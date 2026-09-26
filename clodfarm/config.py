@@ -55,6 +55,7 @@ class Config:
     stall_threshold: int  # this many failed runs in a row pause the whole farm (0 = never)
     notify_url: str  # webhook for important events: ntfy, Slack or Discord ("" = none)
     task_budget_usd: float  # API mode: --max-budget-usd per agent run (0 = none)
+    ui: bool  # serve the farm UI from the daemon (FARM_UI_PORT, default 8080)
     manage_claude_config: bool  # write the farm guide and folder trust into Claude Code's config (container: yes)
     policy: Policy
 
@@ -116,6 +117,7 @@ def load() -> Config:
         timeout_resumes=int(_env("FARM_TIMEOUT_RESUMES", "2")),
         stall_threshold=int(_env("FARM_STALL_THRESHOLD", "5")),
         notify_url=_env("FARM_NOTIFY_URL", ""),
+        ui=_bool("FARM_UI", True),
         manage_claude_config=_bool("FARM_MANAGE_CLAUDE_CONFIG", True),
         policy=Policy(
             max_workers=int(_env("FARM_MAX_WORKERS", "3")),

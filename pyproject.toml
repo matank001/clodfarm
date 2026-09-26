@@ -45,6 +45,9 @@ Changelog = "https://github.com/matank001/clodfarm/blob/main/CHANGELOG.md"
 [tool.setuptools]
 packages = ["clodfarm"]
 
+[tool.setuptools.package-data]
+clodfarm = ["ui/*", "ui/fonts/*"]
+
 [tool.setuptools.dynamic]
 version = {attr = "clodfarm.__version__"}
 

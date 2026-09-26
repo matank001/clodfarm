@@ -56,6 +56,7 @@ def env(tmp_path, backend, request, monkeypatch):
         "AWS_SECRET_ACCESS_KEY": "test",
         "FARM_WORKSPACE": str(tmp_path / "workspace"),
         "FARM_CLAUDE_BIN": str(fake),
+        "FARM_UI": "0",
         "CLAUDE_CONFIG_DIR": str(tmp_path / "claude-home"),
         "FAKE_CLAUDE_LOG": str(tmp_path / "claude.log"),
         "FARM_IDLE_SLEEP": "1",

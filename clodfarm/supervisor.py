@@ -39,12 +39,20 @@ class Farm:
         self.stop = threading.Event()
         self.procs: dict[str, subprocess.Popen] = {}
         self.no_mission_logged = False
+        self.ui = None
 
     # ------------------------------------------------------------ lifecycle
     def run(self):
         if threading.current_thread() is threading.main_thread():
             signal.signal(signal.SIGTERM, lambda *_: self.stop.set())
             signal.signal(signal.SIGINT, lambda *_: self.stop.set())
+        if self.cfg.ui:
+            # up before the login, so the first agent can be hatched (logged in) from the browser
+            try:
+                from .web import serve
+                self.ui = serve(self.cfg, self.store, block=False)
+            except OSError as e:
+                print(f"farm UI not started: {e}", flush=True)
         self.wait_for_auth()
         self.ensure_table()
         gitops.ensure_repo(self.cfg.repo_dir, self.cfg.repo_url)
@@ -98,6 +106,8 @@ class Farm:
         and free its slots right away, so another box, or this one after a restart, continues without waiting for
         leases to expire."""
         print("stopping: handing running tasks back to the queue", flush=True)
+        if self.ui:
+            self.ui.ui.manager.shutdown()  # the agents added in the UI hand their tasks back too
         for p in list(self.procs.values()):
             try:
                 os.killpg(p.pid, signal.SIGTERM)

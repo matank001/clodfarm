@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- **The farm UI** (`http://localhost:8080`, served by the daemon; `FARM_UI=0` turns it off). A pixel-art farm: every
+  worker is a Claude critter that wanders, tends its task's crop at a terminal, or naps when the governor paces it.
+  Finished tasks bloom into Claude sparks, the quest board shows the queue. Handheld-RPG menus: the party (every
+  Claude account with 5-hour and 7-day "stamina" bars), the quest log (active / queued / done / failed, cancel and
+  retry), new quests, the mission, the journal, pause and resume.
+- **Hatch agents from the browser.** Each agent you add is its own Claude Code login (the UI runs `claude auth login`
+  and shows its URL; you paste the code back) and its own `clodfarm run` process on the same queue, paced on that
+  account's budget. The farm's first login can be done the same way.
+- One password, no username: `FARM_UI_PASSWORD`, `clodfarm ui-passwd`, or a generated one printed once in the log.
+  PBKDF2 hashes, HMAC-signed HttpOnly SameSite=Strict cookies, a CSRF header on every write, a login lockout and a
+  strict CSP. Compose publishes the port on 127.0.0.1 only.
+- Git changes are locked across processes too (several agents on one box share the repo).
+
 ## 0.1.2 (2026-09-25)
 
 - Talk to the farm from your phone: every session, including the ones you open through Remote Control, now knows

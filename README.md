@@ -60,7 +60,9 @@ operations layer:
 | 🧭 **Never runs dry** | When the queue empties, a planner reads `MISSION.md` and the work so far, then queues the next concrete tasks. |
 | 🔔 **Tells you when it matters** | Notifications to ntfy, Slack or Discord for failures, a tripped circuit breaker, usage limits, and "nothing left to do". |
 
-No web dashboard on purpose: the Claude app, a CLI and the logs are the whole interface.
+| 🕹️ **A farm you can watch** | Open `http://localhost:8080`: every agent is a pixel Claude walking the farm, tending its task at a terminal or napping when the budget says so. Read the quest log, post quests, set the mission, and hatch new agents (each one its own Claude login) from the browser. |
+
+The farm UI, the Claude app, the CLI and the logs all drive the same queue: use whichever is at hand.
 
 ## Quick start
 
@@ -78,7 +80,9 @@ docker exec clodfarm clodfarm mission "Build csv2md: a CLI that converts CSV to 
 docker exec clodfarm clodfarm status
 ```
 
-Or open **Claude app → Code → clodfarm** and just talk to it.
+Or open **Claude app → Code → clodfarm** and just talk to it, or open the farm UI at **http://localhost:8080**
+(see [docs/ui.md](docs/ui.md)): the password is printed once in `docker logs clodfarm`, or set `FARM_UI_PASSWORD`.
+From the UI you can also log the farm in: tap the egg, open the Claude login link and paste the code back.
 
 <details>
 <summary><b>Prefer plain Docker, or Compose?</b></summary>

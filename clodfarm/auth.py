@@ -28,11 +28,17 @@ def claude_json_path() -> str:
     return os.path.join(os.path.expanduser(d), ".claude.json") if d else os.path.expanduser("~/.claude.json")
 
 
-def auth_status(claude_bin: str = "claude") -> dict:
-    """What `claude auth status` reports, plus how we are authenticated."""
+def auth_status(claude_bin: str = "claude", config_dir: str | None = None) -> dict:
+    """What `claude auth status` reports, plus how we are authenticated.
+    With ``config_dir``: the login saved in that Claude config dir only (an agent added in the farm UI)."""
+    env = None
+    if config_dir:
+        env = {k: v for k, v in os.environ.items() if k not in ("CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_API_KEY",
+                                                                  "ANTHROPIC_AUTH_TOKEN")}
+        env["CLAUDE_CONFIG_DIR"] = config_dir
     try:
         p = subprocess.run([claude_bin, "auth", "status"], capture_output=True, text=True, timeout=30,
-                           stdin=subprocess.DEVNULL)
+                           stdin=subprocess.DEVNULL, env=env)
     except FileNotFoundError:
         return {"loggedIn": False, "error": f"{claude_bin} not found"}
     except subprocess.TimeoutExpired:
@@ -41,7 +47,10 @@ def auth_status(claude_bin: str = "claude") -> dict:
         st = json.loads(p.stdout or "{}")
     except ValueError:
         st = {"loggedIn": False, "error": (p.stdout + p.stderr).strip()[:300]}
-    if os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
+    if config_dir:
+        if st.get("loggedIn"):
+            st["via"] = f"login saved in {config_dir}"
+    elif os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"):
         st["via"] = "CLAUDE_CODE_OAUTH_TOKEN (claude setup-token)"
         st.setdefault("loggedIn", True)
     elif os.environ.get("ANTHROPIC_API_KEY"):

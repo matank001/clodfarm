@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<meta name="theme-color" content="#4f6b25">
+<meta name="robots" content="noindex, nofollow">
+<title>clodfarm</title>
+<link rel="icon" href="favicon.svg" type="image/svg+xml">
+<link rel="preload" href="fonts/PressStart2P.ttf" as="font" type="font/ttf" crossorigin>
+<link rel="stylesheet" href="style.css">
+<script src="app.js" defer></script>
+</head>
+<body>
+<canvas id="world" aria-hidden="true"></canvas>
+<div id="labels" aria-hidden="true"></div>
+
+<!-- ============================== title screen ============================== -->
+<main id="title" class="screen" hidden>
+  <div class="title-card">
+    <h1 class="logo"><span>CLOD</span><span>FARM</span></h1>
+    <p class="tagline">a farm of Claude Code agents</p>
+    <form id="login-form" class="panel login" autocomplete="on">
+      <input name="user" autocomplete="username" value="clodfarm" hidden>
+      <label>PASSWORD<input name="password" type="password" autocomplete="current-password" required></label>
+      <p class="form-error" id="login-error" role="alert"></p>
+      <button class="btn primary" type="submit">▶ ENTER THE FARM</button>
+    </form>
+    <p class="hint blink">PRESS START</p>
+  </div>
+</main>
+
+<!-- ================================ the farm ================================ -->
+<div id="hud" hidden>
+  <button id="goal" class="goal" type="button" aria-label="Main quest (mission): open to read or change it">
+    <span class="goal-label">GOAL</span><span class="goal-text" id="goal-text">SET A MISSION</span>
+  </button>
+
+  <div class="chips" id="chips" aria-live="polite"></div>
+
+  <button id="menu-btn" class="menu-btn" type="button" aria-label="Menu" aria-haspopup="true">
+    <span></span><span></span><span></span>
+  </button>
+  <nav id="menu" class="panel menu" hidden aria-label="Farm menu">
+    <button type="button" data-act="quests">QUESTS</button>
+    <button type="button" data-act="party">PARTY</button>
+    <button type="button" data-act="hatch">HATCH</button>
+    <button type="button" data-act="new">NEW QUEST</button>
+    <button type="button" data-act="mission">MAIN QUEST</button>
+    <button type="button" data-act="journal">JOURNAL</button>
+    <button type="button" data-act="pause" id="menu-pause">PAUSE FARM</button>
+    <button type="button" data-act="logout">LOG OUT</button>
+    <button type="button" data-act="close">EXIT</button>
+  </nav>
+
+  <div class="toolbar" role="toolbar" aria-label="Farm actions">
+    <div class="tool-grid">
+      <button type="button" class="tool" data-act="party" title="Party: your Claude agents (P)"><img alt="" data-icon="party"><span>PARTY</span></button>
+      <button type="button" class="tool" data-act="quests" title="Quest log: every task (Q)"><img alt="" data-icon="scroll"><span>QUESTS</span></button>
+      <button type="button" class="tool" data-act="hatch" title="Hatch a new Claude agent (H)"><img alt="" data-icon="egg"><span>HATCH</span></button>
+    </div>
+    <button type="button" class="tool round" data-act="new" title="Post a new quest (N)"><img alt="" data-icon="quill"><span>NEW QUEST</span></button>
+  </div>
+
+  <div id="textbox" class="textbox" role="status" aria-live="polite">
+    <p id="textbox-text"></p><span class="more" aria-hidden="true">▼</span>
+  </div>
+</div>
+
+<!-- ================================= dialogs ================================= -->
+<dialog id="dlg-summary" class="panel dlg" aria-labelledby="sum-name">
+  <div class="sum-head">
+    <canvas class="sum-sprite" id="sum-sprite" width="32" height="32" aria-hidden="true"></canvas>
+    <div>
+      <h2 id="sum-name">CLAUDE</h2>
+      <p class="muted" id="sum-sub"></p>
+    </div>
+  </div>
+  <div id="sum-body"></div>
+  <div class="dlg-actions" id="sum-actions"></div>
+  <button class="x" type="button" data-close aria-label="Close">✕</button>
+</dialog>
+
+<dialog id="dlg-party" class="panel dlg wide" aria-labelledby="party-h">
+  <h2 id="party-h">PARTY</h2>
+  <p class="muted">Every Claude account on this farm. Each one is paced on its own budget.</p>
+  <ul class="party" id="party-list"></ul>
+  <div class="dlg-actions"><button class="btn primary" type="button" data-act="hatch">+ HATCH A CLAUDE</button></div>
+  <button class="x" type="button" data-close aria-label="Close">✕</button>
+</dialog>
+
+<dialog id="dlg-quests" class="panel dlg wide" aria-labelledby="quests-h">
+  <h2 id="quests-h">QUEST LOG</h2>
+  <div class="tabs" role="tablist" id="quest-tabs">
+    <button role="tab" type="button" data-tab="active">ACTIVE</button>
+    <button role="tab" type="button" data-tab="queued">QUEUED</button>
+    <button role="tab" type="button" data-tab="done">DONE</button>
+    <button role="tab" type="button" data-tab="failed">FAILED</button>
+  </div>
+  <ul class="quest-list" id="quest-list" role="tabpanel"></ul>
+  <div class="dlg-actions"><button class="btn primary" type="button" data-act="new">+ NEW QUEST</button></div>
+  <button class="x" type="button" data-close aria-label="Close">✕</button>
+</dialog>
+
+<dialog id="dlg-quest" class="panel dlg wide" aria-labelledby="quest-title">
+  <p class="kicker" id="quest-kicker"></p>
+  <h2 id="quest-title"></h2>
+  <div id="quest-body"></div>
+  <div class="dlg-actions" id="quest-actions"></div>
+  <button class="x" type="button" data-close aria-label="Close">✕</button>
+</dialog>
+
+<dialog id="dlg-new" class="panel dlg" aria-labelledby="new-h">
+  <h2 id="new-h">NEW QUEST</h2>
+  <form id="new-form">
+    <label>TITLE<input name="title" maxlength="300" required placeholder="Add CSV export to the report page"></label>
+    <label>DETAILS <span class="muted">(optional: what done looks like)</span>
+      <textarea name="prompt" rows="6" placeholder="The full instructions for the agent. Leave empty to use the title."></textarea></label>
+    <label>PRIORITY <output id="prio-out">5</output>
+      <input name="priority" type="range" min="0" max="9" value="5"></label>
+    <p class="form-error" role="alert"></p>
+    <div class="dlg-actions"><button class="btn primary" type="submit">▶ POST QUEST</button></div>
+  </form>
+  <button class="x" type="button" data-close aria-label="Close">✕</button>
+</dialog>
+
+<dialog id="dlg-mission" class="panel dlg wide" aria-labelledby="mission-h">
+  <h2 id="mission-h">MAIN QUEST</h2>
+  <p class="muted">MISSION.md. When the queue runs dry, the planner reads it and queues the next quests.</p>
+  <form id="mission-form">
+    <textarea name="text" rows="12" required placeholder="Build csv2md: a CLI that converts CSV to Markdown tables, with tests."></textarea>
+    <p class="form-error" role="alert"></p>
+    <div class="dlg-actions"><button class="btn primary" type="submit">▶ SAVE MISSION</button></div>
+  </form>
+  <button class="x" type="button" data-close aria-label="Close">✕</button>
+</dialog>
+
+<dialog id="dlg-hatch" class="panel dlg" aria-labelledby="hatch-h">
+  <h2 id="hatch-h">HATCH A CLAUDE</h2>
+  <div id="hatch-body"></div>
+  <button class="x" type="button" data-close aria-label="Close">✕</button>
+</dialog>
+
+<dialog id="dlg-journal" class="panel dlg wide" aria-labelledby="journal-h">
+  <h2 id="journal-h">JOURNAL</h2>
+  <ol class="journal" id="journal-list"></ol>
+  <button class="x" type="button" data-close aria-label="Close">✕</button>
+</dialog>
+</body>
+</html>

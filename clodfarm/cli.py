@@ -9,6 +9,7 @@
     clodfarm mission [TEXT | -f FILE]  show or set MISSION.md (the planner keeps agents busy with it)
     clodfarm events [-n 30] [-f]      the farm's event log
     clodfarm pause [REASON] | resume  stop or restart new work on every farm sharing the table
+    clodfarm ui | ui-passwd           serve the farm UI on its own | set its password
     clodfarm init                     create the DynamoDB table
     clodfarm doctor                   check claude, login, DynamoDB, git and the workspace
 
@@ -340,6 +341,33 @@ def cmd_doctor(cfg, a):
     return 0 if ok else 1
 
 
+def cmd_ui(cfg, a):
+    from .web import serve
+    serve(cfg)
+    return 0
+
+
+def cmd_ui_passwd(cfg, a):
+    import getpass
+    from .web import Auth
+    if os.environ.get("FARM_UI_PASSWORD"):
+        print("FARM_UI_PASSWORD is set in the environment and wins over a stored password: change it there.",
+              file=sys.stderr)
+        return 1
+    auth = Auth(os.path.join(cfg.workspace, ".farm", "ui-auth.json"))
+    pw = sys.stdin.readline().rstrip("\n") if not sys.stdin.isatty() else getpass.getpass("new farm UI password: ")
+    if sys.stdin.isatty() and getpass.getpass("again: ") != pw:
+        print("the passwords don't match", file=sys.stderr)
+        return 1
+    try:
+        auth.set_password(pw)
+    except ValueError as e:
+        print(str(e), file=sys.stderr)
+        return 1
+    print("farm UI password saved (every open session is signed out)")
+    return 0
+
+
 def cmd_run(cfg, a):
     from .supervisor import Farm
     Farm(cfg, _store(cfg)).run()
@@ -388,6 +416,8 @@ def main(argv=None):
     m.add_argument("-f", "--file", help="read the mission from a file")
     add("pause", cmd_pause, "pause new work everywhere").add_argument("reason", nargs="*")
     add("resume", cmd_resume, "resume work")
+    add("ui", cmd_ui, "serve the farm UI (the daemon also serves it unless FARM_UI=0)")
+    add("ui-passwd", cmd_ui_passwd, "set the farm UI password (reads stdin when piped)")
     add("init", cmd_init, "create the DynamoDB table")
     add("doctor", cmd_doctor, "check the setup")
 
