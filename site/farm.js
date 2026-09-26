@@ -746,10 +746,10 @@ function reconcile(st) {
 // =========================================================================== UI
 const api = async (path, body) => {
   const opt = body === undefined ? {} : { method: "POST", headers: { "Content-Type": "application/json", "X-Clodfarm": "1" }, body: JSON.stringify(body) };
-  const r = await fetch(path, { credentials: "same-origin", ...opt });
+  const r = await fetch(path, { credentials: "same-origin", ...opt }); // relative: works under a path prefix too
   let data = {};
   try { data = await r.json(); } catch { /* empty */ }
-  if (r.status === 401 && path !== "/api/login" && path !== "/api/me") { UI.showTitle(); throw new Error("log in first"); }
+  if (r.status === 401 && path !== "api/login" && path !== "api/me") { UI.showTitle(); throw new Error("log in first"); }
   if (!r.ok) throw new Error(data.error || `HTTP ${r.status}`);
   return data;
 };
@@ -782,7 +782,7 @@ const UI = {
     for (const img of $$("img[data-icon]")) img.src = icon(img.dataset.icon);
     Scene.init();
     this.bind();
-    try { const me = await api("/api/me"); App.user = me.user; this.showFarm(); }
+    try { const me = await api("api/me"); App.user = me.user; this.showFarm(); }
     catch { this.showTitle(); }
   },
   showTitle() {
@@ -807,7 +807,7 @@ const UI = {
   },
   async refresh(first = false) {
     let st;
-    try { st = await api("/api/state"); } catch { return; }
+    try { st = await api("api/state"); } catch { return; }
     App.state = st;
     for (const k of ["running", "waiting", "queued", "done", "failed"]) for (const t of st.tasks[k]) App.lastTitles[t.id] = t.title;
     reconcile(st);
@@ -874,7 +874,7 @@ const UI = {
       e.preventDefault();
       const f = new FormData(e.target), err = $("#login-error"), btn = e.target.querySelector("button");
       err.textContent = ""; btn.disabled = true;
-      try { const r = await api("/api/login", { password: f.get("password") }); App.user = r.user; e.target.reset(); this.showFarm(); }
+      try { const r = await api("api/login", { password: f.get("password") }); App.user = r.user; e.target.reset(); this.showFarm(); }
       catch (x) { err.textContent = x.message.toUpperCase(); }
       finally { btn.disabled = false; }
     });
@@ -895,14 +895,14 @@ const UI = {
     $("#new-form").addEventListener("submit", async (e) => {
       e.preventDefault();
       const f = new FormData(e.target), err = e.target.querySelector(".form-error");
-      try { await api("/api/tasks", { text: f.get("text") });
+      try { await api("api/tasks", { text: f.get("text") });
         $("#dlg-new").close(); e.target.reset(); this.say("Quest posted! A Claude picks it up soon."); this.refresh(); }
       catch (x) { err.textContent = x.message; }
     });
     $("#mission-form").addEventListener("submit", async (e) => {
       e.preventDefault();
       const err = e.target.querySelector(".form-error");
-      try { await api("/api/mission", { text: new FormData(e.target).get("text") }); $("#dlg-mission").close(); this.say("Main quest saved. The planner reads it when the board is empty."); this.refresh(); }
+      try { await api("api/mission", { text: new FormData(e.target).get("text") }); $("#dlg-mission").close(); this.say("Main quest saved. The planner reads it when the board is empty."); this.refresh(); }
       catch (x) { err.textContent = x.message; }
     });
     addEventListener("keydown", (e) => {
@@ -975,7 +975,7 @@ const UI = {
       rel.addEventListener("click", async () => {
         if (rel.dataset.sure !== "1") { rel.dataset.sure = "1"; rel.textContent = "SURE? LOGS IT OUT"; return; }
         rel.disabled = true; rel.textContent = "RELEASING…";
-        try { await api(`/api/agents/${a.id}/remove`, {}); $("#dlg-summary").close(); this.say(`${a.name.toUpperCase()} left the farm. Bye bye!`); this.refresh(); }
+        try { await api(`api/agents/${a.id}/remove`, {}); $("#dlg-summary").close(); this.say(`${a.name.toUpperCase()} left the farm. Bye bye!`); this.refresh(); }
         catch (x) { rel.textContent = x.message.slice(0, 40); }
       });
       acts.push(rel);
@@ -991,7 +991,7 @@ const UI = {
     fill($("#quest-actions"));
     $("#dlg-quest").showModal();
     let d;
-    try { d = await api(`/api/tasks/${t.id}`); } catch (x) { fill($("#quest-body"), h("p", { class: "form-error", text: x.message })); return; }
+    try { d = await api(`api/tasks/${t.id}`); } catch (x) { fill($("#quest-body"), h("p", { class: "form-error", text: x.message })); return; }
     $("#quest-kicker").textContent = "QUEST · " + label(d.status);
     const byId = new Map(["running", "waiting", "queued", "done", "failed"].flatMap(k => App.state.tasks[k]).map(x => [x.id, x]));
     const kids = (d.children || []).map(id => byId.get(id)).filter(Boolean);
@@ -1002,8 +1002,8 @@ const UI = {
         h("span", { class: `badge ${k.status}`, text: label(k.status).split(" ")[0] }), h("a", { href: "#", onclick: (e) => { e.preventDefault(); this.openQuest(k); } }, k.title))))] : null,
       d.result ? [h("h3", { text: "RESULT" }), h("pre", { text: d.result })] : null);
     const acts = [];
-    if (["queued", "waiting", "running"].includes(d.status)) acts.push(h("button", { class: "btn danger", type: "button", onclick: async () => { await api(`/api/tasks/${d.id}/cancel`, {}); this.refresh(); this.openQuest(d); } }, "CANCEL"));
-    if (["failed", "cancelled"].includes(d.status)) acts.push(h("button", { class: "btn primary", type: "button", onclick: async () => { await api(`/api/tasks/${d.id}/retry`, {}); this.refresh(); this.openQuest(d); } }, "↻ TRY AGAIN"));
+    if (["queued", "waiting", "running"].includes(d.status)) acts.push(h("button", { class: "btn danger", type: "button", onclick: async () => { await api(`api/tasks/${d.id}/cancel`, {}); this.refresh(); this.openQuest(d); } }, "CANCEL"));
+    if (["failed", "cancelled"].includes(d.status)) acts.push(h("button", { class: "btn primary", type: "button", onclick: async () => { await api(`api/tasks/${d.id}/retry`, {}); this.refresh(); this.openQuest(d); } }, "↻ TRY AGAIN"));
     fill($("#quest-actions"), acts);
   },
   openMission() {
@@ -1034,7 +1034,7 @@ const UI = {
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       const btn = form.querySelector("button"); btn.disabled = true;
-      try { const a = await api("/api/agents", { name: new FormData(form).get("name") }); this.hatchFor = a.id; this.renderHatch({ state: "starting" }); this.pollHatch(); this.refresh(); }
+      try { const a = await api("api/agents", { name: new FormData(form).get("name") }); this.hatchFor = a.id; this.renderHatch({ state: "starting" }); this.pollHatch(); this.refresh(); }
       catch (x) { form.querySelector(".form-error").textContent = x.message; btn.disabled = false; }
     });
     fill($("#hatch-body"), form);
@@ -1042,14 +1042,14 @@ const UI = {
     form.querySelector("input").focus();
   },
   async beginLogin(id) {
-    try { const s = await api(`/api/agents/${id}/login`, {}); this.renderHatch(s); this.pollHatch(); }
+    try { const s = await api(`api/agents/${id}/login`, {}); this.renderHatch(s); this.pollHatch(); }
     catch (x) { this.renderHatch({ state: "failed", error: x.message }); }
   },
   pollHatch() {
     this.stopHatchPoll();
     this.hatchPoll = setInterval(async () => {
       if (!this.hatchFor) return;
-      try { const s = await api(`/api/agents/${this.hatchFor}/login`); this.renderHatch(s); if (s.state === "done" || s.state === "failed") this.stopHatchPoll(); }
+      try { const s = await api(`api/agents/${this.hatchFor}/login`); this.renderHatch(s); if (s.state === "done" || s.state === "failed") this.stopHatchPoll(); }
       catch { /* keep polling */ }
     }, 1000);
   },
@@ -1081,7 +1081,7 @@ const UI = {
       h("div", { class: "dlg-actions" }, h("button", { class: "btn primary", type: "submit", disabled: s.state !== "waiting_code" }, s.state === "checking" ? "HATCHING…" : "▶ DONE")));
     codeForm.addEventListener("submit", async (e) => {
       e.preventDefault();
-      try { const r = await api(`/api/agents/${this.hatchFor}/code`, { code: new FormData(codeForm).get("code") }); this.renderHatch(r); this.pollHatch(); }
+      try { const r = await api(`api/agents/${this.hatchFor}/code`, { code: new FormData(codeForm).get("code") }); this.renderHatch(r); this.pollHatch(); }
       catch (x) { codeForm.querySelector(".form-error").textContent = x.message; }
     });
     const link = s.url ? h("a", { class: "btn primary login-link", href: s.url, target: "_blank", rel: "noopener noreferrer" }, "OPEN THE CLAUDE LOGIN ↗")

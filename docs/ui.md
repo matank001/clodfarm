@@ -2,7 +2,8 @@
 
 `clodfarm run` serves a small web UI on port 8080 (`FARM_UI_PORT`; `FARM_UI=0` turns it off; `clodfarm ui` serves it
 alone). Compose publishes it on `127.0.0.1:8080`, so it is reachable from the machine itself only. To reach it from
-elsewhere, put a TLS reverse proxy in front (it should send `X-Forwarded-Proto: https`, which marks the cookie
+elsewhere, put a TLS reverse proxy in front (`FARM_UI_BASE=/team` serves it under a path, `FARM_UI_TRUST_PROXY=1`
+reads the client address from `X-Forwarded-For` for the login lockout, `FARM_UI_SECURE=1` marks the cookie Secure) (it should send `X-Forwarded-Proto: https`, which marks the cookie
 `Secure`), or use an SSH tunnel: `ssh -L 8080:localhost:8080 myserver`.
 
 ## What you see

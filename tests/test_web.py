@@ -137,3 +137,39 @@ def test_auth_generates_a_password_once(tmp_path, monkeypatch):
     assert a.verify(tok) == "farmer" and a.verify(tok[:-2] + "00") is None
     a.set_password("new password")
     assert a.verify(tok) is None  # a new password signs every session out
+
+
+def test_path_prefix_behind_a_proxy(env, backend, monkeypatch):
+    if backend != "sqlite":
+        pytest.skip("one backend is enough")
+    import importlib
+    from http.server import ThreadingHTTPServer
+    import clodfarm.web as web
+    monkeypatch.setenv("FARM_UI_PASSWORD", "correct horse")
+    monkeypatch.setenv("FARM_UI_BASE", "/team/")
+    monkeypatch.setenv("FARM_UI_TRUST_PROXY", "1")
+    monkeypatch.setenv("FARM_UI_SECURE", "1")
+    web = importlib.reload(web)
+    try:
+        cfg = load()
+        Store.from_config(cfg).ensure_table()
+        farm_ui = web.FarmUI(cfg)
+        srv = ThreadingHTTPServer(("127.0.0.1", 0), web.make_handler(farm_ui))
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        base = f"http://127.0.0.1:{srv.server_address[1]}"
+        call = client()
+        assert call(base + "/healthz")[0] == 200  # the container health check stays at the root
+        assert call(base + "/api/state")[0] == 404  # outside the prefix
+        code, _, headers = call(base + "/team/api/login", {"password": "correct horse"}, headers={"X-Forwarded-For": "1.2.3.4"})
+        assert code == 200 and "Path=/team/" in headers["Set-Cookie"] and "Secure" in headers["Set-Cookie"]
+        # the lockout counts the forwarded client, not the proxy: another client can still log in
+        for _ in range(5):
+            call(base + "/team/api/login", {"password": "x"}, headers={"X-Forwarded-For": "6.6.6.6"})
+        assert call(base + "/team/api/login", {"password": "x"}, headers={"X-Forwarded-For": "6.6.6.6"})[0] == 429
+        assert client()(base + "/team/api/login", {"password": "correct horse"}, headers={"X-Forwarded-For": "1.2.3.4"})[0] == 200
+        srv.shutdown()
+        farm_ui.manager.shutdown()
+    finally:
+        for k in ("FARM_UI_BASE", "FARM_UI_TRUST_PROXY", "FARM_UI_SECURE"):
+            monkeypatch.delenv(k, raising=False)
+        importlib.reload(web)

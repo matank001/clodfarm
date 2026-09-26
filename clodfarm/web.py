@@ -3,6 +3,9 @@
     clodfarm ui            serve it on its own (the farm daemon also serves it when FARM_UI=1, the default)
     clodfarm ui-passwd     set the UI password
 
+Behind a reverse proxy: FARM_UI_BASE=/team serves it under a path prefix, FARM_UI_SECURE=1 marks the cookie Secure,
+and FARM_UI_TRUST_PROXY=1 takes the client address from X-Forwarded-For (for the login lockout).
+
 Standard library only. One password, no username (FARM_UI_PASSWORD, or `clodfarm ui-passwd`; with neither, a
 password is generated on first start and printed once in the log). Passwords are stored as PBKDF2
 hashes; sessions are HMAC-signed, HttpOnly, SameSite=Strict cookies; every write needs a JSON body and the
@@ -29,6 +32,7 @@ from . import __version__
 from .agents import AgentManager
 from .store import Store, now
 
+BASE = "/" + os.environ.get("FARM_UI_BASE", "").strip("/") if os.environ.get("FARM_UI_BASE", "").strip("/") else ""
 UI_DIR = os.path.join(os.path.dirname(os.path.abspath(__file__)), "ui")
 COOKIE = "clodfarm_session"
 SESSION_DAYS = 7
@@ -258,7 +262,21 @@ def make_handler(ui: FarmUI):
 
         # -------------------------------------------------------- helpers
         def _ip(self) -> str:
+            if os.environ.get("FARM_UI_TRUST_PROXY") == "1":
+                # the proxy appends the address it saw, so the last entry is the one to trust
+                xff = [x.strip() for x in (self.headers.get("X-Forwarded-For") or "").split(",") if x.strip()]
+                if xff:
+                    return xff[-1]
             return self.client_address[0]
+
+        def _path(self) -> str | None:
+            """The request path without the FARM_UI_BASE prefix; None when it is outside the prefix."""
+            path = self.path.split("?", 1)[0]
+            if not BASE:
+                return path
+            if path == BASE:
+                return None  # redirected to BASE/ by the caller, so relative URLs resolve
+            return path[len(BASE):] if path.startswith(BASE + "/") else ""
 
         def _headers(self, status: int, ctype: str, extra: dict | None = None, length: int | None = None):
             self.send_response(status)
@@ -288,10 +306,10 @@ def make_handler(ui: FarmUI):
             return ui.auth.verify(c[COOKIE].value if COOKIE in c else None)
 
         def _secure(self) -> bool:
-            return self.headers.get("X-Forwarded-Proto", "") == "https"
+            return os.environ.get("FARM_UI_SECURE") == "1" or self.headers.get("X-Forwarded-Proto", "") == "https"
 
         def _cookie(self, value: str, max_age: int) -> str:
-            return (f"{COOKIE}={value}; Path=/; HttpOnly; SameSite=Strict; Max-Age={max_age}"
+            return (f"{COOKIE}={value}; Path={BASE or ''}/; HttpOnly; SameSite=Strict; Max-Age={max_age}"
                     + ("; Secure" if self._secure() else ""))
 
         def _body(self) -> dict:
@@ -318,8 +336,18 @@ def make_handler(ui: FarmUI):
 
         # ----------------------------------------------------------- GET
         def do_GET(self):
-            path = self.path.split("?", 1)[0]
+            if self.path.split("?", 1)[0] == "/healthz":  # the container health check, with or without a prefix
+                return self._json({"ok": True, "version": __version__})
+            path = self._path()
+            if path is None:
+                self.send_response(308)
+                self.send_header("Location", BASE + "/")
+                self.send_header("Content-Length", "0")
+                self.end_headers()
+                return
             try:
+                if path == "":
+                    return self._err(404, "not found")
                 if path in ("/", "/index.html"):
                     return self._static("index.html")
                 if path == "/healthz":
@@ -354,7 +382,7 @@ def make_handler(ui: FarmUI):
 
         # ---------------------------------------------------------- POST
         def do_POST(self):
-            path = self.path.split("?", 1)[0]
+            path = self._path() or ""
             try:
                 if self.headers.get("X-Clodfarm") != "1" or \
                         not (self.headers.get("Content-Type") or "").startswith("application/json"):

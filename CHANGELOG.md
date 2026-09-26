@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1 (2026-09-26)
+
+- The farm UI runs behind a reverse proxy under a path prefix: `FARM_UI_BASE=/team` (the UI uses relative URLs, the
+  cookie is scoped to the prefix), `FARM_UI_SECURE=1` for a Secure cookie, and `FARM_UI_TRUST_PROXY=1` so the login
+  lockout counts the forwarded client, not the proxy. `/healthz` stays at the root for the container health check.
+
 ## 0.2.0 (2026-09-26)
 
 - **The farm UI** (`http://localhost:8080`, served by the daemon; `FARM_UI=0` turns it off). A pixel-art farm: every
