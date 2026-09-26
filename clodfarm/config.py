@@ -98,7 +98,7 @@ def load() -> Config:
         remote_control=_bool("FARM_REMOTE_CONTROL", True),
         rc_spawn=_env("FARM_RC_SPAWN", "worktree"),
         rc_capacity=int(_env("FARM_RC_CAPACITY", "4")),
-        planner=_bool("FARM_PLANNER", True),
+        planner=_bool("FARM_PLANNER", False),  # opt in: plan from MISSION.md whenever the queue runs dry
         planner_cooldown=int(_env("FARM_PLANNER_COOLDOWN", "600")),
         planner_max_backoff=int(_env("FARM_PLANNER_MAX_BACKOFF", "21600")),
         max_queue=int(_env("FARM_MAX_QUEUE", "25")),

@@ -11,6 +11,7 @@ Items (PK / SK):
     SLOT               / <seat>#<n>        concurrency slot n of that seat (lease, shared by its boxes)
     SPEND              / <seat>#<day>      API-mode list-price spend per seat and day
     WORKER             / <farm>/<worker>   heartbeat
+    SCHEDULE           / <id>              a scheduled task: queued again every time it is due
     CONTROL            / GLOBAL | PLANNER | HEALTH
     EVENT#<yyyy-mm-dd> / <ts>#<rand>       event log (expires after 30 days)
 """
@@ -25,6 +26,7 @@ import time
 
 from .backends import Backend, DynamoBackend, SqliteBackend
 from .governor import Snapshot
+from .schedule import next_run
 
 EVENT_TTL = 30 * 86400
 DEFAULT_SEAT = "default"  # single-account farms and tests
@@ -90,7 +92,9 @@ class Store:
         return f"TASK#{tid}", "META"
 
     def add_task(self, title: str, prompt: str, priority: int = 5, parent: str | None = None,
-                 kind: str = "task", created_by: str = "human", max_depth: int = 3, max_attempts: int = 3) -> dict:
+                 kind: str = "task", created_by: str = "human", max_depth: int = 3, max_attempts: int = 3,
+                 to: str | None = None) -> dict:
+        """``to`` hands the task to one Claude on the farm (an agent's name, e.g. ``gil``): only its boxes take it."""
         depth = 0
         if parent:
             p = self.get_task(parent)
@@ -104,7 +108,7 @@ class Store:
         item = {"PK": f"TASK#{tid}", "SK": "META", "GSI1PK": "STATUS#queued", "GSI1SK": _prio_key(priority, t, tid),
                 "ver": 1, "id": tid, "title": title[:300], "prompt": prompt, "status": "queued", "priority": priority,
                 "kind": kind, "parent": parent, "depth": depth, "created": t, "updated": t, "created_by": created_by,
-                "attempts": 0, "max_attempts": max_attempts, "resumes": 0, "children_open": 0}
+                "attempts": 0, "max_attempts": max_attempts, "resumes": 0, "children_open": 0, "to": to or None}
         item = {k: v for k, v in item.items() if v is not None}
         self.b.put(item, expect_ver=0)
         spawner = os.environ.get("FARM_TASK_ID")
@@ -113,7 +117,7 @@ class Store:
         if parent:
             self._update(*self._tkey(parent), lambda x: {**x, "children_open": int(x.get("children_open", 0)) + 1,
                                                           "children": list(x.get("children") or []) + [tid]})
-        self.event("task.added", f"{tid} {title[:120]}", task=tid, by=created_by)
+        self.event("task.added", f"{tid} {title[:120]}" + (f" (for {to})" if to else ""), task=tid, by=created_by)
         return item
 
     def get_task(self, tid: str) -> dict | None:
@@ -144,13 +148,18 @@ class Store:
             return task
         return self._update(*self._tkey(tid), fn) is not None
 
-    def claim_next(self, worker: str, lease: int, farm: str | None = None, affinity: float = 600) -> dict | None:
-        """Atomically take the highest-priority queued task.
+    def claim_next(self, worker: str, lease: int, farm: str | None = None, affinity: float = 600,
+                   agent: str | None = None) -> dict | None:
+        """Atomically take the highest-priority queued task this box may take.
+
+        A task handed to one Claude (``to``) is only taken by that agent's boxes (``agent`` is the box's farm name).
 
         A task waiting to be *resumed* keeps its conversation on the box it last ran on (``home``). For ``affinity``
         seconds only that box may take it; after that anyone may, starting fresh with the results so far."""
-        for item in self.b.query_index("STATUS#queued", 25):
+        for item in self.b.query_index("STATUS#queued", 100):
             tid = item["id"]
+            if item.get("to") and item["to"] != agent:
+                continue
             if farm and item.get("resume") and item.get("home") and item["home"] != farm \
                     and now() - float(item.get("updated", 0)) < affinity:
                 continue
@@ -277,6 +286,82 @@ class Store:
                 self.event("task.reaped", f"{task['id']} lease expired (worker {task.get('worker')}); {status}",
                            task=task["id"])
         return n
+
+    def forget_box(self, farm_id: str) -> int:
+        """A box (or an agent added in the UI) left for good: hand its running tasks back, free its slots and drop
+        its heartbeats, so it stops showing up as working. Returns how many tasks went back to the queue."""
+        mine, n = f"{farm_id}/", 0
+        for t in self.b.query_index("STATUS#running"):
+            if not str(t.get("worker", "")).startswith(mine):
+                continue
+            # its conversation lived in that login: another Claude restarts it fresh, from the work on its branch
+            if self._set_status(t["id"], "queued", when=self._mine(t["worker"]),
+                                remove=("lease_until", "worker", "home", "session_id"),
+                                extra={"resume": True, "resume_reason": "restart",
+                                       "attempts": max(0, int(t.get("attempts", 1)) - 1)}):
+                self.event("task.restart", f"{t['id']}: its Claude left the farm; back in the queue", task=t["id"])
+                n += 1
+        for s in self.b.query("SLOT"):
+            if str(s.get("holder", "")).startswith(mine):
+                self.release_slot(s["SK"], s["holder"])
+        for w in self.b.query("WORKER", sk_prefix=mine):
+            self.b.delete("WORKER", w["SK"])
+        return n
+
+    # ------------------------------------------------------------- schedules
+    def add_schedule(self, title: str, prompt: str, *, cron: str | None = None, every: int | None = None,
+                     at: float | None = None, tz: str = "UTC", to: str | None = None, priority: int = 5,
+                     created_by: str = "human") -> dict:
+        """Queue ``title`` on a schedule: a cron line (in ``tz``), every N seconds, or once ``at`` a time."""
+        if sum(x is not None for x in (cron, every, at)) != 1:
+            raise ValueError("give exactly one of cron, every or at")
+        spec = {"cron": cron, "every": every, "at": at, "tz": tz}
+        first = next_run(spec, now())
+        if first is None:
+            raise ValueError("that schedule never runs")
+        sid = "s" + new_id()
+        item = {"PK": "SCHEDULE", "SK": sid, "ver": 1, "id": sid, "title": title[:300], "prompt": prompt,
+                "priority": priority, "created_by": created_by, "created": now(), "next_at": first, "runs": 0,
+                **{k: v for k, v in {**spec, "to": to or None}.items() if v is not None}}
+        self.b.put(item, expect_ver=0)
+        self.event("schedule.added", f"{sid} {title[:120]}", by=created_by)
+        return item
+
+    def schedules(self) -> list[dict]:
+        return sorted(self.b.query("SCHEDULE"), key=lambda x: float(x.get("next_at", 0)))
+
+    def remove_schedule(self, sid: str) -> bool:
+        it = self.b.get("SCHEDULE", sid)
+        if not it:
+            return False
+        self.b.delete("SCHEDULE", sid)
+        self.event("schedule.removed", f"{sid} {it.get('title', '')[:120]}")
+        return True
+
+    def fire_due(self, max_depth: int = 3, max_attempts: int = 3) -> list[dict]:
+        """Queue every schedule that is due. Safe on every box at once: each firing is claimed atomically."""
+        out, t = [], now()
+        for sch in self.b.query("SCHEDULE"):
+            if float(sch.get("next_at", 0)) > t:
+                continue
+            due = float(sch["next_at"])
+
+            def advance(x, due=due):
+                if float(x.get("next_at", 0)) != due:
+                    return None  # another box fired it
+                nxt = None if x.get("at") is not None else next_run(x, max(t, due))  # a one-off fires once
+                x.update(next_at=nxt if nxt is not None else -1, runs=int(x.get("runs", 0)) + 1, last_at=t)
+                return x
+            it = self._update("SCHEDULE", sch["SK"], advance)
+            if not it:
+                continue
+            task = self.add_task(it["title"], it["prompt"], priority=int(it.get("priority", 5)),
+                                 created_by=f"schedule:{it['id']}", max_depth=max_depth,
+                                 max_attempts=max_attempts, to=it.get("to"))
+            out.append(task)
+            if float(it["next_at"]) < 0:  # a one-off: done
+                self.b.delete("SCHEDULE", it["SK"])
+        return out
 
     def add_run(self, tid: str, run: dict):
         self.b.put({"PK": f"TASK#{tid}", "SK": f"RUN#{iso()}#{secrets.token_hex(2)}", "ver": 1,

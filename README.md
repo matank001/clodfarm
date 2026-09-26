@@ -38,8 +38,8 @@ Add more boxes, or your teammates' own accounts, and they share one queue while 
 <tr>
 <td width="25%" valign="top"><b>01 · Install</b><br>One line on any box with Docker, or one command on AWS with no open ports.</td>
 <td width="25%" valign="top"><b>02 · Log in from anywhere</b><br><code>clodfarm login</code> prints a URL. Approve it on your phone and paste the code.</td>
-<td width="25%" valign="top"><b>03 · Give it a mission</b><br><code>clodfarm mission "..."</code>, queue tasks, or just talk to it in the Claude app.</td>
-<td width="25%" valign="top"><b>04 · It keeps going</b><br>It plans, splits, tests and merges, and paces itself on your real limits.</td>
+<td width="25%" valign="top"><b>03 · Talk to it from your phone</b><br>Open the Claude app → Code → your farm and ask. It does the work, or starts sub-workers.</td>
+<td width="25%" valign="top"><b>04 · It keeps going</b><br>It hands work to your teammates' Claudes, runs scheduled tasks, tests and merges, paced on your real limits.</td>
 </tr>
 </table>
 
@@ -57,12 +57,14 @@ operations layer:
 | 🌕 **Paced on real usage** | Every run reports the account's actual 5-hour and weekly utilization (`rate_limit_event`). The governor paces the week, leaves you 20% by default, sleeps through rejections, and never touches paid overage. |
 | 👥 **Many boxes, many seats** | Point containers on several accounts at one table: one queue, one repo, a separate budget per account. |
 | ✅ **Nothing lands untested** | `FARM_VERIFY_CMD` runs your tests on the rebased branch, and a failing check sends the agent back to fix it. |
-| 🧭 **Never runs dry** | When the queue empties, a planner reads `MISSION.md` and the work so far, then queues the next concrete tasks. |
+| 🤝 **Claudes that work together** | Your Claude hands a job to a teammate's Claude on the same farm: `clodfarm task add ... --to gil`. Only Gil's Claude takes it, on Gil's budget. |
+| ⏰ **Scheduled tasks** | "Every weekday at 9, summarize the open PRs": `clodfarm schedule add ... --cron "0 9 * * 1-5" --tz Asia/Jerusalem`, or `--every 2h`, or `--at "in 3h"`. |
 | 🔔 **Tells you when it matters** | Notifications to ntfy, Slack or Discord for failures, a tripped circuit breaker, usage limits, and "nothing left to do". |
 
-| 🕹️ **A farm you can watch** | Open `http://localhost:8080`: every agent is a pixel Claude walking the farm, tending its task at a terminal or napping when the budget says so. Read the quest log, post quests, set the mission, and hatch new agents (each one its own Claude login) from the browser. |
+| 🕹️ **A farm you can watch** | Open `http://localhost:8080`: every agent is a pixel Claude walking the farm, tending its task at a terminal or napping when the budget says so. Tap a Claude for its budget and a link to talk to it in the Claude app, and hatch new agents (each one its own Claude login) from the browser. |
 
-The farm UI, the Claude app, the CLI and the logs all drive the same queue: use whichever is at hand.
+You talk to your Claude in the Claude app; the farm UI shows who is working on what; the CLI and the logs drive the
+same queue.
 
 ## Quick start
 
@@ -73,14 +75,16 @@ curl -fsSL https://raw.githubusercontent.com/matank001/clodfarm/main/scripts/ins
 ```
 
 It pulls the image, starts `clodfarm` (restarting on reboot), and opens the login: a URL you approve on any
-device, then paste the code back. Then give it something to do:
+device, then paste the code back. Then open **Claude app → Code → clodfarm** on your phone and just talk to it:
+"add CSV export to the report page", "have gil's Claude review it", "every morning at 9, triage new issues".
+Or from a shell:
 
 ```bash
-docker exec clodfarm clodfarm mission "Build csv2md: a CLI that converts CSV to Markdown tables, with tests."
+docker exec clodfarm clodfarm task add "Add CSV export" --prompt "Add CSV export to the report page, with tests."
 docker exec clodfarm clodfarm status
 ```
 
-Or open **Claude app → Code → clodfarm** and just talk to it, or open the farm UI at **http://localhost:8080**
+The farm UI is at **http://localhost:8080**
 (see [docs/ui.md](docs/ui.md)): the password is printed once in `docker logs clodfarm`, or set `FARM_UI_PASSWORD`.
 From the UI you can also log the farm in: tap the egg, open the Claude login link and paste the code back.
 
@@ -99,8 +103,9 @@ Either way the farm's state lives in a SQLite file inside the workspace volume, 
 </details>
 
 > [!TIP]
-> Point it at a real repo with `FARM_REPO_URL` (plus a deploy key), set `FARM_VERIFY_CMD="pytest -q"`, and write a
-> `MISSION.md`. The farm clones the repo, keeps the agents busy, and pushes `main` only when your tests pass.
+> Point it at a real repo with `FARM_REPO_URL` (plus a deploy key) and set `FARM_VERIFY_CMD="pytest -q"`. The farm
+> clones the repo and pushes `main` only when your tests pass. Want it to keep itself busy? `FARM_PLANNER=1` plus a
+> `MISSION.md` turns on the planner, which queues the next tasks whenever the queue runs dry.
 
 ## Deploy
 
@@ -189,7 +194,7 @@ flowchart LR
   subgraph box[Each box: clodfarm run]
     rc[Remote Control keeper]
     w[Workers<br/>claude -p, one worktree each]
-    plan[Planner<br/>reads MISSION.md]
+    sched[Schedules<br/>cron / every / at]
     gate[Verify gate<br/>FARM_VERIFY_CMD]
   end
   subgraph ddb[The farm store: SQLite on one box, DynamoDB across boxes]
@@ -203,7 +208,7 @@ flowchart LR
   app <--> rc
   cli --> q
   w -- claim / finish --> q
-  plan -- queue next tasks --> q
+  sched -- queue when due --> q
   w -- "task add --parent" --> q
   w -- rate_limit_event --> b
   b -- governor --> s
@@ -221,8 +226,10 @@ flowchart LR
    - **A sub-task:** its branch waits for the parent to merge it.
    - **A top-level task:** it's rebased onto `main`, `FARM_VERIFY_CMD` runs, and it fast-forwards `main` only if
      the check passes. Otherwise the agent is resumed with the failure output.
-4. **When the queue is empty** and there's budget, one planner run turns `MISSION.md` into the next tasks, and backs
-   off when there's nothing useful to do.
+4. **A schedule that is due** queues its task (every box checks; each firing is claimed atomically, so it runs once).
+   A task with `--to <name>` is only taken by that Claude's boxes.
+5. **Optional planner** (`FARM_PLANNER=1`): when the queue is empty and there's budget, one planner run turns
+   `MISSION.md` into the next tasks, and backs off when there's nothing useful to do.
 
 <details>
 <summary><b>The budget governor, in detail</b></summary>
@@ -278,9 +285,11 @@ Details and caveats: [docs/auth.md](docs/auth.md).
 |---|---|
 | `clodfarm status` | seats, queue, workers, running tasks, the Remote Control link |
 | `clodfarm budget [--refresh]` | every seat's usage and what the governor allows it now |
-| `clodfarm task add TITLE --prompt ... [--parent ID] [--priority 0-9]` | queue work (agents use the same command) |
+| `clodfarm task add TITLE --prompt ... [--parent ID] [--to NAME] [--priority 0-9]` | queue work (agents use the same command); `--to` hands it to one Claude |
 | `clodfarm task list / show / cancel / retry` | inspect and manage tasks |
-| `clodfarm mission [TEXT]` | show or set `MISSION.md`, which the planner keeps the agents busy with |
+| `clodfarm agents` | the Claudes on this farm |
+| `clodfarm schedule add TITLE (--cron ... [--tz ...] \| --every 2h \| --at ...)` / `list` / `remove ID` | scheduled tasks |
+| `clodfarm mission [TEXT]` | show or set `MISSION.md`, for the optional planner (`FARM_PLANNER=1`) |
 | `clodfarm events [-f]` | the event log: claims, merges, checks, pauses, limits |
 | `clodfarm pause [reason]` / `resume` | stop and restart new work on every box |
 | `clodfarm login / whoami / doctor` | login and a setup check |

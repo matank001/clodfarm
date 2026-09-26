@@ -4,8 +4,12 @@
     clodfarm login | logout | whoami  Claude subscription login (see docs/auth.md)
     clodfarm status                   workers, queue, budget in one screen
     clodfarm budget [--refresh]       subscription usage and what the governor allows
-    clodfarm task add TITLE [--prompt TEXT | --prompt-file F | -] [--parent ID] [--priority 0-9]
+    clodfarm task add TITLE [--prompt TEXT | --prompt-file F | -] [--parent ID] [--priority 0-9] [--to AGENT]
     clodfarm task list [--status S] | show ID | cancel ID | retry ID
+    clodfarm agents                   the Claudes on this farm (hand one a task with `task add --to NAME`)
+    clodfarm schedule add TITLE (--cron "0 9 * * 1-5" [--tz Europe/Berlin] | --every 2h | --at 2026-10-01T09:00 | --at "in 3h")
+                          [--prompt TEXT] [--to AGENT]
+    clodfarm schedule list | remove ID
     clodfarm mission [TEXT | -f FILE]  show or set MISSION.md (the planner keeps agents busy with it)
     clodfarm events [-n 30] [-f]      the farm's event log
     clodfarm pause [REASON] | resume  stop or restart new work on every farm sharing the table
@@ -213,12 +217,18 @@ def cmd_task(cfg, a):
             if store.count("queued") >= cfg.max_queue and by != "human":
                 print(f"queue is full ({cfg.max_queue} queued): not adding. Finish or cancel work first.", file=sys.stderr)
                 return 3
+            to = (a.to or "").strip() or None
+            if to and to not in _agent_names(store) and not a.force:
+                print(f"no Claude named '{to}' is on the farm right now ({', '.join(sorted(_agent_names(store))) or 'none'});"
+                      " check `clodfarm agents`, or add --force to queue it for when it joins", file=sys.stderr)
+                return 2
             t = store.add_task(a.title, _read_prompt(a), priority=a.priority, parent=parent, created_by=by,
-                               max_depth=cfg.max_depth, max_attempts=cfg.max_attempts)
+                               max_depth=cfg.max_depth, max_attempts=cfg.max_attempts, to=to)
         except ValueError as e:
             print(str(e), file=sys.stderr)
             return 2
-        _out(t, a.json, f"queued {t['id']}: {t['title']}" + (f" (sub-task of {parent})" if parent else ""))
+        _out(t, a.json, f"queued {t['id']}: {t['title']}" + (f" (sub-task of {parent})" if parent else "")
+             + (f" for {t['to']}" if t.get("to") else ""))
         return 0
     if a.sub == "list":
         ts = store.list_tasks(a.status, a.limit)
@@ -252,6 +262,63 @@ def cmd_task(cfg, a):
     if a.sub == "retry":
         ok = store.retry(a.id)
         print("re-queued" if ok else "not re-queued (still open?)")
+        return 0 if ok else 1
+    return 1
+
+
+def _agents(store) -> dict[str, dict]:
+    """Every Claude on the farm that is up, by name (the part of a box id before '@'), from the heartbeats."""
+    out: dict[str, dict] = {}
+    for w in store.workers():
+        box, wid = w["SK"].rsplit("/", 1)
+        a = out.setdefault(box.split("@")[0], {"name": box.split("@")[0], "boxes": set(), "seat": w.get("seat"),
+                                                "workers": []})
+        a["boxes"].add(box)
+        a["workers"].append({"worker": wid, "state": w.get("state", ""), "task": w.get("task")})
+    return out
+
+
+def _agent_names(store) -> set[str]:
+    return set(_agents(store))
+
+
+def cmd_agents(cfg, a):
+    agents = _agents(_store(cfg))
+    rows = [{**x, "boxes": sorted(x["boxes"]), "me": x["name"] == cfg.name} for x in agents.values()]
+    lines = []
+    for r in sorted(rows, key=lambda r: (not r["me"], r["name"])):
+        busy = sum(w["state"] == "running" for w in r["workers"])
+        lines.append(f"  {r['name']:<20}{' (you)' if r['me'] else '      '}  {busy}/{len(r['workers'])} working"
+                     f"  seat {r['seat'] or '-'}  {', '.join(r['boxes'])}")
+    _out(rows, a.json, "CLAUDES on this farm (hand one a task: clodfarm task add \"...\" --prompt \"...\" --to NAME)\n"
+         + ("\n".join(lines) or "  (none up: is `clodfarm run` running?)"))
+    return 0
+
+
+def cmd_schedule(cfg, a):
+    from .schedule import describe, parse_at, parse_every
+    store = _store(cfg)
+    if a.sub == "add":
+        try:
+            spec = {"cron": a.cron} if a.cron else {"every": parse_every(a.every)} if a.every else \
+                {"at": parse_at(a.at, a.tz)}
+            sch = store.add_schedule(a.title, _read_prompt(a), tz=a.tz, to=(a.to or None), priority=a.priority,
+                                     created_by=os.environ.get("FARM_TASK_ID") or "human", **spec)
+        except (ValueError, KeyError) as e:
+            print(f"bad schedule: {e}", file=sys.stderr)
+            return 2
+        _out(sch, a.json, f"scheduled {sch['id']}: {sch['title']}  {describe(sch)}"
+             + (f" for {sch['to']}" if sch.get("to") else "") + f"; next run {_until(sch['next_at'])}")
+        return 0
+    if a.sub == "list":
+        rows = store.schedules()
+        _out(rows, a.json, "\n".join(
+            f"  {r['id']}  {describe(r):<32} next {_until(r['next_at']):<26} ran {r.get('runs', 0)}x  {r['title'][:60]}"
+            + (f"  (for {r['to']})" if r.get("to") else "") for r in rows) or "(no schedules)")
+        return 0
+    if a.sub == "remove":
+        ok = store.remove_schedule(a.id)
+        print("removed" if ok else "no such schedule")
         return 0 if ok else 1
     return 1
 
@@ -401,12 +468,32 @@ def main(argv=None):
     ta.add_argument("--prompt-file")
     ta.add_argument("--parent", help="make it a sub-task of this task (use $FARM_TASK_ID)")
     ta.add_argument("--priority", type=int, default=5, help="0-9, higher runs first")
+    ta.add_argument("--to", help="hand it to one Claude on the farm by name (see `clodfarm agents`)")
+    ta.add_argument("--force", action="store_true", help="with --to: queue it even if that Claude isn't up now")
     tl = ts.add_parser("list")
     tl.add_argument("--status", choices=["queued", "running", "waiting", "done", "failed", "cancelled"])
     tl.add_argument("--limit", type=int, default=50)
     for name in ("show", "cancel", "retry"):
         ts.add_parser(name).add_argument("id")
     for q in (ta, tl, *[ts.choices[n] for n in ("show", "cancel", "retry")]):
+        q.add_argument("--json", action="store_true")
+    add("agents", cmd_agents, "the Claudes on this farm")
+    sc = add("schedule", cmd_schedule, "run a task on a schedule")
+    scs = sc.add_subparsers(dest="sub", required=True)
+    sa = scs.add_parser("add")
+    sa.add_argument("title")
+    sa.add_argument("--prompt", help="full instructions (default: the title); '-' reads stdin")
+    sa.add_argument("--prompt-file")
+    when = sa.add_mutually_exclusive_group(required=True)
+    when.add_argument("--cron", help="five-field cron line, e.g. '0 9 * * 1-5' (in --tz)")
+    when.add_argument("--every", help="an interval: 30m, 2h, 1d, 1w")
+    when.add_argument("--at", help="once: 2026-10-01T09:00 (in --tz), or 'in 3h'")
+    sa.add_argument("--tz", default=os.environ.get("FARM_TZ") or "UTC", help="time zone for --cron/--at (default FARM_TZ or UTC)")
+    sa.add_argument("--to", help="hand each run to one Claude on the farm by name")
+    sa.add_argument("--priority", type=int, default=5)
+    scs.add_parser("list")
+    scs.add_parser("remove").add_argument("id")
+    for q in scs.choices.values():
         q.add_argument("--json", action="store_true")
     e = add("events", cmd_events, "the event log")
     e.add_argument("-n", type=int, default=30)

@@ -33,16 +33,15 @@
 
 <!-- ================================ the farm ================================ -->
 <div id="hud" hidden>
-  <button id="goal" class="goal" type="button" aria-label="Main quest (mission): open to read or change it">
-    <span class="goal-label">GOAL</span><span class="goal-text" id="goal-text">SET A MISSION</span>
-  </button>
-
   <div class="chips" id="chips" aria-live="polite"></div>
 
 
   <div class="toolbar" role="toolbar" aria-label="Farm actions">
+    <a class="talk-hint" id="talk-hint" href="https://claude.ai/code" target="_blank" rel="noopener noreferrer" title="Talk to your Claude in the Claude app">
+      <b>TALK TO YOUR CLAUDE</b>
+      <span>Open the <strong>Claude app</strong> → <strong>Code</strong> → <strong id="talk-name">clodfarm</strong> and ask it anything. It can start sub-workers, hand work to the other Claudes and schedule tasks.</span>
+    </a>
     <button type="button" class="tool wide-tool" data-act="hatch" title="Add a new Claude (C)"><img alt="" data-icon="egg"><span>+ NEW CLAUDE</span></button>
-    <button type="button" class="tool round" data-act="new" title="Give the farm a quest (N)"><img alt="" data-icon="quill"><span>NEW QUEST</span></button>
   </div>
 
   <div id="textbox" class="textbox" role="status" aria-live="polite">
@@ -61,35 +60,6 @@
   </div>
   <div id="sum-body"></div>
   <div class="dlg-actions" id="sum-actions"></div>
-  <button class="x" type="button" data-close aria-label="Close">✕</button>
-</dialog>
-
-<dialog id="dlg-quest" class="panel dlg wide" aria-labelledby="quest-title">
-  <p class="kicker" id="quest-kicker"></p>
-  <h2 id="quest-title"></h2>
-  <div id="quest-body"></div>
-  <div class="dlg-actions" id="quest-actions"></div>
-  <button class="x" type="button" data-close aria-label="Close">✕</button>
-</dialog>
-
-<dialog id="dlg-new" class="panel dlg" aria-labelledby="new-h">
-  <h2 id="new-h">NEW QUEST</h2>
-  <form id="new-form">
-    <textarea name="text" rows="7" required aria-label="The quest" placeholder="What should the Claudes do? e.g. Add CSV export to the report page, with tests."></textarea>
-    <p class="form-error" role="alert"></p>
-    <div class="dlg-actions"><button class="btn primary" type="submit">▶ GO</button></div>
-  </form>
-  <button class="x" type="button" data-close aria-label="Close">✕</button>
-</dialog>
-
-<dialog id="dlg-mission" class="panel dlg wide" aria-labelledby="mission-h">
-  <h2 id="mission-h">MAIN QUEST</h2>
-  <p class="muted">MISSION.md. When the queue runs dry, the planner reads it and queues the next quests.</p>
-  <form id="mission-form">
-    <textarea name="text" rows="12" required placeholder="Build csv2md: a CLI that converts CSV to Markdown tables, with tests."></textarea>
-    <p class="form-error" role="alert"></p>
-    <div class="dlg-actions"><button class="btn primary" type="submit">▶ SAVE MISSION</button></div>
-  </form>
   <button class="x" type="button" data-close aria-label="Close">✕</button>
 </dialog>
 

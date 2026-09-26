@@ -17,15 +17,17 @@ reads the client address from `X-Forwarded-For` for the login lockout, `FARM_UI_
 | `!` | The worker reported an error, or the agent's process isn't running. |
 | An egg with `?` | An agent that isn't logged in yet. Click it to log it in. |
 | Crops | Running tasks grow; done tasks bloom into Claude's spark; failed ones wilt. |
-| The quest board | The queue: one note per queued task. |
-| A mini Claude | A sub-agent: a sub-task of the quest on that plot. It types when it's working and shows `…` while it waits for a free Claude. |
+| A mini Claude | A sub-worker: a sub-task of the task on that plot. It types when it's working and shows `…` while it waits for a free Claude. |
 
 At night (your local time) the farm gets dark and the terminals glow.
 
-Click a Claude for its status, what it's working on, its sub-agents, its quests of the last 7 days and its budget
-left (5-hour and 7-day). Click a plot for its quest. **+ NEW CLAUDE** adds a Claude login, **NEW QUEST** posts a
-quest (just text: its first line becomes its name), and **GOAL** sets MISSION.md. Keys: `N` new quest, `C` new
-Claude, `M` mission.
+Click a Claude for its status, what it's working on, its sub-workers, its tasks of the last 7 days, its budget
+left (5-hour and 7-day) and **TALK TO IT**: the link to its Remote Control session in the Claude app. That's where
+you give it work: it does it, starts sub-workers, hands work to the other Claudes on the farm (`--to <name>`) and
+schedules tasks. **+ NEW CLAUDE** (key `C`) adds a Claude login.
+
+When you **release** a Claude, it leaves with its workers: its `clodfarm run` stops, its running tasks go back to
+the queue for another Claude, and its heartbeats are dropped so it no longer shows on the farm.
 
 ## Agents ("hatching")
 

@@ -128,8 +128,9 @@ a { color: inherit; }
   .actions { margin: 14px 0 8px; }
 }
 @media (max-width: 640px) {
-  .goal { display: none; }
-  .stage { padding-top: 24px; }
+  .goal { top: max(12px, env(safe-area-inset-top)); padding: 4px; border-width: 3px; }
+  .goal-label, .goal-text { font-size: 9px; padding: 7px 8px; white-space: nowrap; }
+  .stage { padding-top: 64px; }
   .explain { font-size: 21px; }
   .install { padding: 8px 8px 8px 12px; }
   .install code { font-size: 19px; padding: 6px 0; }

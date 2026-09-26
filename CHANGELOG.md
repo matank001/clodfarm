@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.3.0 (2026-09-26)
+
+Simpler: you talk to your Claude, and it runs the farm.
+
+- **No more quests, goal or mission in the UI.** The farm UI shows your Claudes at work; tap one for its budget and
+  a **TALK TO IT** link to its Remote Control session in the Claude app. That's where you give it work.
+- **Claudes work together:** `clodfarm agents` lists the Claudes on the farm, and `clodfarm task add ... --to gil`
+  hands a task to one of them: only its boxes take it, on its own account's budget. Your Claude does this when you
+  ask ("have gil's Claude review it").
+- **Scheduled tasks:** `clodfarm schedule add TITLE --prompt ... (--cron "0 9 * * 1-5" --tz Europe/Berlin | --every 2h |
+  --at "in 3h")`, `schedule list`, `schedule remove`. Every box checks every 15 s; each firing runs once.
+- **The planner is opt-in** (`FARM_PLANNER=1` with a `MISSION.md`). `clodfarm mission` still works for it.
+- **Fix: a released Claude left its workers behind.** The agent keeper could restart a Claude while it was being
+  released, and its last heartbeats kept it on the farm as a "visitor". Now it leaves the registry first, can't be
+  restarted, its running tasks go back to the queue (fresh, without waiting for its box), its slots are freed and
+  its heartbeats dropped.
+
 ## 0.2.1 (2026-09-26)
 
 - The farm UI runs behind a reverse proxy under a path prefix: `FARM_UI_BASE=/team` (the UI uses relative URLs, the

@@ -268,7 +268,7 @@ function layoutWorld(W, H, opts = {}) {
 
 function blocked(L, x, y) {
   const inR = (r, pad = 0) => x > r.x - pad && x < r.x + r.w + pad && y > r.y - pad && y < r.y + r.h + pad + 4;
-  if (inR(L.barn, 8) || inR(L.board, 6) || inR(L.field, 2) || (L.reserve && inR(L.reserve, 12))) return true;
+  if (inR(L.barn, 8) || (Scene.passive && inR(L.board, 6)) || inR(L.field, 2) || (L.reserve && inR(L.reserve, 12))) return true;
   if (((x - L.pond.cx) / (L.pond.rx + 8)) ** 2 + ((y - L.pond.cy) / (L.pond.ry + 6)) ** 2 < 1) return true;
   return L.rocks.some(r => Math.abs(x - r.x) < r.w / 2 + 6 && y > r.y - 4 && y < r.y + r.h + 4);
 }
@@ -549,7 +549,6 @@ const Scene = {
     }
     if (best) return { critter: best };
     const L = this.world.L;
-    for (const [i, p2] of L.plots.entries()) if (p.x >= p2.x - 2 && p.x <= p2.x + p2.w + 2 && p.y >= p2.y - 10 && p.y <= p2.y + p2.h + 2 && this.plotTasks[i]) return { task: this.plotTasks[i] };
     return null;
   },
   onMove(e) { if (this.demo || this.passive) return; const r = this.hit(this.toLogical(e)); this.hover = r?.critter || null; this.cv.style.cursor = r ? "pointer" : "default"; },
@@ -558,7 +557,6 @@ const Scene = {
     const r = this.hit(this.toLogical(e));
     if (!r) { this.selected = null; return; }
     if (r.critter) { this.selected = r.critter; UI.openCritter(r.critter); }
-    else if (r.task) UI.openQuest(r.task);
   },
   sparkle(x, y, n = 14, color) {
     for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2, s = 10 + Math.random() * 26;
@@ -582,18 +580,20 @@ const Scene = {
         : (nowS() - (task.started || task.updated || nowS())) < 120 ? "seed" : (nowS() - (task.started || 0)) < 900 ? "sprout" : "grow";
       for (let k = 0; k < 3; k++) drawCrop(g, p.x + 5 + k * 8, p.y + p.h - 3, stage, t + k, task.status === "done");
     });
-    // quest board
-    const b = L.board;
-    g.fillStyle = "rgba(20,32,10,.35)"; g.fillRect(b.x + 1, b.y + b.h + 5, b.w, 3);
-    g.fillStyle = "#4a3120"; g.fillRect(b.x + 2, b.y + 4, 2, b.h + 4); g.fillRect(b.x + b.w - 4, b.y + 4, 2, b.h + 4);
-    g.fillStyle = "#3a2616"; g.fillRect(b.x, b.y, b.w, b.h - 2);
-    g.fillStyle = "#8a6038"; g.fillRect(b.x + 1, b.y + 1, b.w - 2, b.h - 4);
-    g.fillStyle = "#a37446"; g.fillRect(b.x + 1, b.y + 1, b.w - 2, 1);
-    for (let i = 0; i < Math.min(6, this.boardCount); i++) {
-      const nx = b.x + 3 + (i % 3) * 7, ny = b.y + 3 + Math.floor(i / 3) * 7;
-      g.fillStyle = i % 2 ? "#fff4c2" : "#f6f1e4"; g.fillRect(nx, ny, 5, 5);
-      g.fillStyle = "#b9ad90"; g.fillRect(nx + 1, ny + 2, 3, 1);
-      g.fillStyle = "#c0392b"; g.fillRect(nx + 2, ny, 1, 1);
+    // the quest board: the landing page's scripted farm only (the real farm has no queue to pin up)
+    if (this.passive) {
+      const b = L.board;
+      g.fillStyle = "rgba(20,32,10,.35)"; g.fillRect(b.x + 1, b.y + b.h + 5, b.w, 3);
+      g.fillStyle = "#4a3120"; g.fillRect(b.x + 2, b.y + 4, 2, b.h + 4); g.fillRect(b.x + b.w - 4, b.y + 4, 2, b.h + 4);
+      g.fillStyle = "#3a2616"; g.fillRect(b.x, b.y, b.w, b.h - 2);
+      g.fillStyle = "#8a6038"; g.fillRect(b.x + 1, b.y + 1, b.w - 2, b.h - 4);
+      g.fillStyle = "#a37446"; g.fillRect(b.x + 1, b.y + 1, b.w - 2, 1);
+      for (let i = 0; i < Math.min(6, this.boardCount); i++) {
+        const nx = b.x + 3 + (i % 3) * 7, ny = b.y + 3 + Math.floor(i / 3) * 7;
+        g.fillStyle = i % 2 ? "#fff4c2" : "#f6f1e4"; g.fillRect(nx, ny, 5, 5);
+        g.fillStyle = "#b9ad90"; g.fillRect(nx + 1, ny + 2, 3, 1);
+        g.fillStyle = "#c0392b"; g.fillRect(nx + 2, ny, 1, 1);
+      }
     }
     // critters, depth-sorted
     const list = [...this.critters.values()];
@@ -755,21 +755,20 @@ const api = async (path, body) => {
 };
 
 const EVENT_TEXT = {
-  "task.added": (e, T) => `New quest on the board: “${T(e)}”.`,
-  "task.claimed": (e, T) => { const w = e.msg.split(" by ")[1] || ""; return `${w ? w.split("@")[0] + "·" + w.split("/").pop() : "A Claude"} took on “${T(e)}”.`; },
-  "task.done": (e, T) => `★ Quest complete: “${T(e)}”!`,
-  "task.failed": (e, T) => `Quest failed: “${T(e)}”. Tap its plot to see why.`,
-  "task.waiting": (e, T) => `“${T(e)}” split into sub-quests and waits for them.`,
-  "task.resume": (e, T) => `Back to “${T(e)}”: its sub-quests are done.`,
-  "task.cancelled": (e, T) => `Quest cancelled: “${T(e)}”.`,
+  "task.added": (e, T) => { const to = (e.msg.match(/\(for ([^)]+)\)$/) || [])[1]; return `New task${to ? " for " + to.toUpperCase() : ""}: “${T(e).replace(/ \(for [^)]+\)$/, "")}”.`; },
+  "task.claimed": (e, T) => { const w = e.msg.split(" by ")[1] || ""; return `${w ? w.split("@")[0] + "·" + w.split("/").pop() : "A Claude"} started “${T(e)}”.`; },
+  "task.done": (e, T) => `★ Done: “${T(e)}”!`,
+  "task.failed": (e, T) => `Failed: “${T(e)}”. Ask your Claude what went wrong.`,
+  "task.waiting": (e, T) => `“${T(e)}” split into sub-workers and waits for them.`,
+  "task.resume": (e, T) => `Back to “${T(e)}”: its sub-workers are done.`,
+  "task.cancelled": (e, T) => `Cancelled: “${T(e)}”.`,
   "verify.passed": (e, T) => `Tests passed for “${T(e)}”. Harvesting it into main!`,
   "verify.failed": (e, T) => `Tests failed for “${T(e)}”. Sent back to fix them.`,
+  "schedule.added": (e) => `Scheduled: “${e.msg.replace(/^\S+\s*/, "")}”.`,
   "farm.paused": (e) => `The farm is paused: ${e.msg || "by hand"}.`,
   "farm.resumed": () => "The farm is back at work!",
   "budget.rejected": () => "Usage limit reached. These Claudes nap until the window resets.",
-  "rc.connected": () => "Remote Control is live: steer the farm from the Claude app.",
-  "mission.set": (e) => `New main quest: ${e.msg}`,
-  "planner.no_mission": () => "No main quest yet. Tap GOAL to set one.",
+  "rc.connected": (e) => `${((e.msg.match(/'([^']+)'/) || [])[1] || "A Claude").toUpperCase()} is live in the Claude app: talk to it from your phone.`,
   "agent.added": (e) => `A new egg for ${e.msg.split(" ")[0].toUpperCase()}. Finish its login to hatch it.`,
   "agent.removed": (e) => `${e.msg.split(" ")[0].toUpperCase()} left the farm.`,
 };
@@ -820,8 +819,8 @@ const UI = {
     const live = st.agents.filter(a => a.loggedIn);
     if (!live.length) { this.say(`Welcome to ${st.farm.toUpperCase()}! No Claude lives here yet. Tap the egg (or + NEW CLAUDE) to log in your first one.`); return; }
     const n = st.agents.reduce((s, a) => s + a.workers.length, 0);
-    this.say(`Welcome back to ${st.farm.toUpperCase()}! ${n} Claude${n === 1 ? "" : "s"} on the farm, ${st.counts.running} quest${st.counts.running === 1 ? "" : "s"} in progress, ${st.counts.queued} on the board.`);
-    if (!st.goal) this.say("There's no main quest yet. Tap GOAL to give the farm a mission.");
+    this.say(`Welcome back to ${st.farm.toUpperCase()}! ${n} Claude${n === 1 ? "" : "s"} on the farm, ${st.counts.running} at work.`);
+    this.say("Talk to your Claude from the Claude app on your phone (Remote Control). Tap a Claude for its link.");
   },
   pushEvents(st) {
     const T = (e) => App.lastTitles[e.task] || (e.msg || "").replace(/^\S+\s*/, "").slice(0, 60) || e.task;
@@ -834,13 +833,16 @@ const UI = {
     }
   },
   renderHud(st) {
-    $("#goal-text").textContent = (st.goal || "SET A MISSION").toUpperCase();
     const claudes = st.agents.reduce((s, a) => s + a.workers.length, 0), eggs = st.agents.filter(a => !a.loggedIn && !a.remote).length;
     const chips = [
       h("span", { class: "chip" }, h("i", { class: "dot" + (claudes ? "" : " off") }), `${st.farm.toUpperCase()}`),
       h("span", { class: "chip" }, "CLAUDES ", h("b", { text: String(claudes) }), eggs ? ` · EGGS ${eggs}` : ""),
-      h("span", { class: "chip" }, "QUESTS ", h("b", { text: String(st.counts.running) }), " ACTIVE · ", h("b", { text: String(st.counts.queued) }), " QUEUED"),
+      h("span", { class: "chip" }, "AT WORK ", h("b", { text: String(st.counts.running) }), st.counts.queued ? [" · WAITING ", h("b", { text: String(st.counts.queued) })] : null),
     ];
+    const me = st.agents.find(a => a.primary);
+    $("#talk-name").textContent = me?.name || st.farm;
+    $("#talk-hint").href = me?.remote_control || "https://claude.ai/code";
+    $("#talk-hint").hidden = !st.agents.some(a => a.loggedIn); // first log a Claude in (the egg)
     if (st.paused) chips.push(h("span", { class: "chip warn" }, "⏸ PAUSED: " + (st.pause_reason || "").slice(0, 40).toUpperCase()));
     fill($("#chips"), ...chips);
   },
@@ -883,7 +885,6 @@ const UI = {
       if (act) { this.act(act, e); return; }
       if (e.target.closest("[data-close]")) e.target.closest("dialog").close();
     });
-    $("#goal").addEventListener("click", () => this.openMission());
     $("#textbox").addEventListener("click", () => this.skip());
     for (const d of $$("dialog")) {
       d.addEventListener("click", (e) => { // a click on the backdrop (outside the box) closes it
@@ -892,29 +893,14 @@ const UI = {
       });
       d.addEventListener("close", () => { if (d.id === "dlg-hatch") this.stopHatchPoll(); if (d.id === "dlg-summary") { this.summaryKey = null; Scene.selected = null; } });
     }
-    $("#new-form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const f = new FormData(e.target), err = e.target.querySelector(".form-error");
-      try { await api("api/tasks", { text: f.get("text") });
-        $("#dlg-new").close(); e.target.reset(); this.say("Quest posted! A Claude picks it up soon."); this.refresh(); }
-      catch (x) { err.textContent = x.message; }
-    });
-    $("#mission-form").addEventListener("submit", async (e) => {
-      e.preventDefault();
-      const err = e.target.querySelector(".form-error");
-      try { await api("api/mission", { text: new FormData(e.target).get("text") }); $("#dlg-mission").close(); this.say("Main quest saved. The planner reads it when the board is empty."); this.refresh(); }
-      catch (x) { err.textContent = x.message; }
-    });
     addEventListener("keydown", (e) => {
       if ($("#hud").hidden || $$("dialog[open]").length || /INPUT|TEXTAREA/.test(document.activeElement?.tagName) || e.metaKey || e.ctrlKey || e.altKey) return;
-      const k = { n: "new", c: "hatch", h: "hatch", m: "mission" }[e.key.toLowerCase()];
+      const k = { c: "hatch", h: "hatch", n: "hatch" }[e.key.toLowerCase()];
       if (k) { e.preventDefault(); this.act(k); }
     });
   },
   act(a) {
     if (a === "hatch") return this.openHatch(null, true);
-    if (a === "new") { for (const d of $$("dialog[open]")) d.close(); $("#new-form .form-error").textContent = ""; $("#dlg-new").showModal(); $("#new-form textarea").focus(); return; }
-    if (a === "mission") return this.openMission();
   },
 
   // ----------------------------------------------------------------- dialogs
@@ -959,13 +945,17 @@ const UI = {
     const kids = task ? (task.children || []).map(id => byId.get(id)).filter(Boolean) : [];
     const parts = [h("dl", { class: "stat-row" },
       h("dt", { text: "STATUS" }), h("dd", { text: doing }),
-      c.root && c.root.id !== task?.id ? [h("dt", { text: "HELPING ON" }), h("dd", {}, h("a", { href: "#", onclick: (e) => { e.preventDefault(); this.openQuest(c.root); } }, c.root.title))] : null,
-      !sub && a.stats ? [h("dt", { text: "QUESTS (7D)" }), h("dd", { text: `${a.stats.done} done · ${a.stats.failed} failed · ${a.stats.took} taken` })] : null,
+      c.root && c.root.id !== task?.id ? [h("dt", { text: "HELPING ON" }), h("dd", { text: c.root.title })] : null,
+      !sub && a.stats ? [h("dt", { text: "TASKS (7D)" }), h("dd", { text: `${a.stats.done} done · ${a.stats.failed} failed · ${a.stats.took} taken` })] : null,
       w ? [h("dt", { text: "LAST SEEN" }), h("dd", { text: ago(w.at) })] : null)];
-    if (task) parts.push(h("h3", { text: "WORKING ON" }), h("a", { href: "#", class: "quest-text", onclick: (e) => { e.preventDefault(); this.openQuest(task); } }, task.title));
-    if (kids.length) parts.push(h("h3", { text: `SUB-AGENTS (${kids.length})` }), h("ul", { class: "subs" }, kids.map(k => h("li", {},
+    if (a && !sub && !c.mini && a.loggedIn) parts.push(h("h3", { text: "TALK TO IT" }), a.remote_control
+      ? [h("a", { class: "btn primary login-link", href: a.remote_control, target: "_blank", rel: "noopener noreferrer" }, "OPEN IN THE CLAUDE APP ↗"),
+        h("p", { class: "muted small", text: `Or open the Claude app, go to Code and pick “${a.name}”. Ask it anything: it can start sub-workers, hand work to the other Claudes here and schedule tasks.` })]
+      : h("p", { class: "muted small", text: a.remote ? "It lives on another box: talk to it from its own Claude app." : "Its Remote Control session is starting. It shows up in the Claude app under Code." }));
+    if (task) parts.push(h("h3", { text: "WORKING ON" }), h("p", { class: "quest-text", text: task.title }));
+    if (kids.length) parts.push(h("h3", { text: `SUB-WORKERS (${kids.length})` }), h("ul", { class: "subs" }, kids.map(k => h("li", {},
       h("span", { class: `badge ${k.status}`, text: { running: "WORKING", queued: "WAITING", waiting: "WAITING", done: "DONE", failed: "FAILED", cancelled: "CANCELLED" }[k.status] || k.status.toUpperCase() }),
-      h("a", { href: "#", onclick: (e) => { e.preventDefault(); this.openQuest(k); } }, k.title)))));
+      h("span", { text: k.title })))));
     if (!sub) parts.push(h("h3", { text: "BUDGET LEFT" }), this.hp("5H", b.five_hour, b.five_hour_resets), this.hp("7D", b.seven_day, b.seven_day_resets),
       b.max ? h("p", { class: "muted small", text: `${b.allowed ?? "?"} of ${b.max} Claudes allowed to work right now` }) : null);
     fill($("#sum-body"), parts);
@@ -983,35 +973,6 @@ const UI = {
     fill($("#sum-actions"), acts);
   },
 
-  async openQuest(t) {
-    for (const d of $$("dialog[open]")) d.close();
-    const label = (s) => ({ running: "IN PROGRESS", queued: "WAITING FOR A CLAUDE", waiting: "SUB-AGENTS AT WORK", done: "DONE", failed: "FAILED", cancelled: "CANCELLED" }[s] || s.toUpperCase());
-    $("#quest-kicker").textContent = "QUEST · " + label(t.status);
-    fill($("#quest-body"), h("p", { class: "muted", text: "Loading…" }));
-    fill($("#quest-actions"));
-    $("#dlg-quest").showModal();
-    let d;
-    try { d = await api(`api/tasks/${t.id}`); } catch (x) { fill($("#quest-body"), h("p", { class: "form-error", text: x.message })); return; }
-    $("#quest-kicker").textContent = "QUEST · " + label(d.status);
-    const byId = new Map(["running", "waiting", "queued", "done", "failed"].flatMap(k => App.state.tasks[k]).map(x => [x.id, x]));
-    const kids = (d.children || []).map(id => byId.get(id)).filter(Boolean);
-    fill($("#quest-body"),
-      h("div", { class: "quest-text big", text: d.prompt || d.title }),
-      d.worker ? h("p", { class: "muted", text: `${d.worker.split("@")[0]} · ${d.worker.split("/").pop()} is on it` }) : null,
-      kids.length ? [h("h3", { text: `SUB-AGENTS (${kids.length})` }), h("ul", { class: "subs" }, kids.map(k => h("li", {},
-        h("span", { class: `badge ${k.status}`, text: label(k.status).split(" ")[0] }), h("a", { href: "#", onclick: (e) => { e.preventDefault(); this.openQuest(k); } }, k.title))))] : null,
-      d.result ? [h("h3", { text: "RESULT" }), h("pre", { text: d.result })] : null);
-    const acts = [];
-    if (["queued", "waiting", "running"].includes(d.status)) acts.push(h("button", { class: "btn danger", type: "button", onclick: async () => { await api(`api/tasks/${d.id}/cancel`, {}); this.refresh(); this.openQuest(d); } }, "CANCEL"));
-    if (["failed", "cancelled"].includes(d.status)) acts.push(h("button", { class: "btn primary", type: "button", onclick: async () => { await api(`api/tasks/${d.id}/retry`, {}); this.refresh(); this.openQuest(d); } }, "↻ TRY AGAIN"));
-    fill($("#quest-actions"), acts);
-  },
-  openMission() {
-    for (const d of $$("dialog[open]")) d.close();
-    const ta = $("#mission-form [name=text]"); ta.value = App.state?.mission || "";
-    $("#mission-form .form-error").textContent = "";
-    $("#dlg-mission").showModal(); ta.focus();
-  },
   // ----------------------------------------------------------------- hatching
   openHatch(agentId, fromButton) {
     for (const d of $$("dialog[open]")) d.close();
@@ -1091,7 +1052,7 @@ const UI = {
       h("ol", { class: "hatch-steps" },
         h("li", { class: s.url ? "done" : "" }, "Open the Claude login page and approve.", link),
         h("li", {}, "Copy the code it shows you and paste it here.", codeForm),
-        h("li", {}, "The egg hatches, and the new Claude starts on the quests.")));
+        h("li", {}, "The egg hatches: talk to the new Claude from its Claude app, or let yours hand it work.")));
     if (s.state === "waiting_code") setTimeout(() => codeForm.querySelector("input")?.focus(), 30);
   },
 };

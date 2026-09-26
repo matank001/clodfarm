@@ -79,12 +79,14 @@ class Farm:
         while not self.stop.is_set():
             try:
                 self.store.reap_expired()
+                for t in self.store.fire_due(self.cfg.max_depth, self.cfg.max_attempts):
+                    print(f"schedule: queued {t['id']} {t['title'][:80]}", flush=True)
                 if now() - last_status > 600:
                     self.print_status()
                     last_status = now()
             except Exception as e:  # keep the farm alive through transient AWS errors
                 print(f"housekeeping error: {e}", flush=True)
-            self.stop.wait(60)
+            self.stop.wait(int(os.environ.get("FARM_TICK_SECONDS", "15")))  # schedules fire within a tick
         self.shutdown()
 
     def ensure_table(self):
@@ -211,7 +213,7 @@ class Farm:
             self.stop.wait(wait)
             return
         try:
-            task = store.claim_next(holder, cfg.lease_seconds, cfg.farm_id, cfg.resume_affinity)
+            task = store.claim_next(holder, cfg.lease_seconds, cfg.farm_id, cfg.resume_affinity, agent=cfg.name)
             if not task:
                 self.maybe_plan()
                 store.heartbeat(cfg.farm_id, wid, "idle", seat=self.seat)

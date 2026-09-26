@@ -89,24 +89,46 @@ def test_lockout_after_five_wrong_tries(ui):
     assert call(base + "/api/login", {"password": "correct horse"})[0] == 429
 
 
-def test_quests_mission_pause(ui):
+def test_state_pause_and_no_quest_endpoints(ui):
     base, farm_ui = ui
     call = client()
     login(call, base)
-    code, t, _ = call(base + "/api/tasks", {"text": "Plant tomatoes\nin the south field", "priority": 7})
-    assert code == 200 and t["status"] == "queued" and t["priority"] == 7
-    code, d, _ = call(base + f"/api/tasks/{t['id']}")
-    assert d["title"] == "Plant tomatoes" and d["prompt"].endswith("south field") and d["runs"] == []
-    assert call(base + f"/api/tasks/{t['id']}/cancel", {})[0] == 200
-    assert farm_ui.store.get_task(t["id"])["status"] == "cancelled"
-    os.makedirs(farm_ui.cfg.repo_dir, exist_ok=True)
-    import subprocess
-    subprocess.run(["git", "init", "-q", farm_ui.cfg.repo_dir], check=True)
-    assert call(base + "/api/mission", {"text": "# Grow a garden\nwith tests"})[0] == 200
+    assert call(base + "/api/tasks", {"text": "Plant tomatoes"})[0] == 404  # you talk to your Claude, not a form
+    assert call(base + "/api/mission", {"text": "Grow"})[0] == 404
+    farm_ui.store.event("rc.connected", f"Remote Control '{farm_ui.cfg.name}' is live: https://claude.ai/code/session_abc")
     assert call(base + "/api/pause", {"reason": "lunch"})[0] == 200
     time.sleep(1.1)  # the state is cached for a second
     st = call(base + "/api/state")[1]
-    assert st["goal"] == "Grow a garden" and st["paused"] and st["pause_reason"] == "lunch"
+    assert st["paused"] and st["pause_reason"] == "lunch" and "goal" not in st
+    me = next(a for a in st["agents"] if a["primary"])
+    assert me["remote_control"] == "https://claude.ai/code/session_abc"
+
+
+def test_released_agent_takes_its_workers_along(ui):
+    import socket
+    base, farm_ui = ui
+    call = client()
+    login(call, base)
+    a = call(base + "/api/agents", {"name": "gil"})[1]
+    box = farm_ui.manager.farm_id(a["id"])
+    t = farm_ui.store.add_task("gil works on this", "x")
+    farm_ui.store.claim_next(f"{box}/w0", 300)
+    farm_ui.store.heartbeat(box, "w0", "running", t["id"])
+    farm_ui.store.heartbeat("ghost@" + socket.gethostname(), "w0", "idle")  # released before this fix
+    farm_ui.store.heartbeat("far-box@elsewhere", "w0", "idle")  # a real visitor from another box
+    time.sleep(1.1)
+    names = {x["id"] for x in call(base + "/api/state")[1]["agents"]}
+    assert a["id"] in names and "far-box@elsewhere" in names and "ghost@" + socket.gethostname() not in names
+    assert call(base + f"/api/agents/{a['id']}/remove", {})[0] == 200
+    assert not farm_ui.manager.alive(a["id"])
+    stale = {**farm_ui.manager.primary(), **a, "primary": False, "config_dir": "/nonexistent"}
+    for _ in range(3):  # keep_alive holding an old copy of the registry must not bring it back
+        farm_ui.manager.spawn(stale)
+    assert not farm_ui.manager.alive(a["id"])
+    assert farm_ui.store.get_task(t["id"])["status"] == "queued"
+    assert all(not w["SK"].startswith(box + "/") for w in farm_ui.store.workers())
+    time.sleep(1.1)
+    assert a["id"] not in {x["id"] for x in call(base + "/api/state")[1]["agents"]}
 
 
 def test_hatch_an_agent_starts_its_own_farm_process(ui):

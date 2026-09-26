@@ -110,20 +110,6 @@ output { color: var(--clay-2); }
 @keyframes blink { to { visibility: hidden; } }
 
 /* ------------------------------------------------------------------------- HUD */
-.goal {
-  position: fixed; top: max(14px, env(safe-area-inset-top)); left: 50%; transform: translateX(-50%);
-  display: flex; align-items: stretch; max-width: min(640px, calc(100vw - 110px));
-  padding: 5px; background: var(--paper); border: var(--px) solid var(--ink); border-radius: 4px;
-  box-shadow: 0 var(--px) 0 var(--shadow);
-}
-.goal:hover .goal-text { background: #fff; }
-.goal-label { font: 12px/1 var(--font-px); color: #fff; background: var(--sky); padding: 10px 12px; display: grid; place-items: center; }
-.goal-text {
-  font: 12px/1.3 var(--font-px); color: var(--ink); background: var(--sky-2); padding: 9px 12px;
-  border: 2px solid var(--sky); border-left: 0; text-align: left;
-  white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-width: 0;
-}
-
 .chips { position: fixed; top: max(14px, env(safe-area-inset-top)); left: 14px; display: flex; flex-direction: column; gap: 6px; }
 .chip {
   display: inline-flex; align-items: center; gap: 8px; width: max-content;
@@ -184,7 +170,7 @@ output { color: var(--clay-2); }
 
 .textbox {
   position: fixed; left: 14px; bottom: max(14px, env(safe-area-inset-bottom));
-  width: min(520px, calc(100vw - 440px)); min-height: 76px; padding: 14px 40px 14px 18px;
+  width: min(520px, calc(100vw - 620px)); min-height: 76px; padding: 14px 40px 14px 18px;
   background: var(--paper); border: var(--px) solid var(--ink); border-radius: 10px;
   box-shadow: inset 0 0 0 3px var(--paper), inset 0 0 0 5px #9fb3c8, 0 var(--px) 0 var(--shadow);
   font-size: 24px; cursor: pointer; transition: opacity .3s;
@@ -193,6 +179,16 @@ output { color: var(--clay-2); }
 .textbox .more { position: absolute; right: 16px; bottom: 10px; font-size: 14px; color: var(--clay); animation: bob .8s steps(2) infinite; }
 .textbox.idle { opacity: .0; pointer-events: none; }
 @keyframes bob { 50% { transform: translateY(3px); } }
+
+.talk-hint {
+  display: grid; gap: 6px; max-width: 330px; padding: 10px 14px; text-decoration: none; color: var(--ink);
+  background: var(--paper); border: var(--px) solid var(--ink); border-radius: 10px;
+  box-shadow: inset 0 0 0 3px var(--paper), inset 0 0 0 5px var(--sky-2), 0 var(--px) 0 var(--shadow);
+  font-size: 19px; line-height: 1.1;
+}
+.talk-hint b { font: 9px/1.4 var(--font-px); font-weight: 400; color: var(--sky); }
+.talk-hint strong { font-weight: 400; color: var(--clay-2); }
+.talk-hint:hover { background: #fff; }
 
 /* ------------------------------------------------------------ world overlays */
 .bubble {
@@ -298,13 +294,17 @@ pre, .pre {
 .egg-anim { display: block; margin: 8px auto 16px; width: 96px; height: 96px; }
 .center { text-align: center; }
 
+@media (max-width: 1100px) and (min-width: 761px) {
+  .talk-hint { max-width: 240px; font-size: 17px; }
+  .textbox { width: calc(100vw - 530px); }
+}
 /* --------------------------------------------------------------------- phones */
 @media (max-width: 760px) {
   body { font-size: 20px; }
   .goal { left: 14px; transform: none; max-width: calc(100vw - 84px); }
   .goal-label, .goal-text { font-size: 9px; padding: 8px; }
-  .chips { top: 72px; }
-  .textbox { width: auto; right: 14px; bottom: 112px; min-height: 60px; font-size: 21px; }
+  .chips { top: max(14px, env(safe-area-inset-top)); }
+  .textbox { width: auto; right: 14px; bottom: calc(max(14px, env(safe-area-inset-bottom)) + 122px); min-height: 60px; font-size: 21px; }
   .tool { width: 60px; height: 60px; }
   .tool img { width: 30px; height: 30px; }
   .tool span { font-size: 6px; }
@@ -319,7 +319,9 @@ pre, .pre {
 .small { font-size: 18px; margin: 6px 0 0; }
 .tool.round { width: 78px; height: 78px; }
   .tool.round img { width: 38px; height: 38px; }
-  .toolbar { left: 14px; right: 14px; justify-content: space-between; }
+  .toolbar { left: 14px; right: 14px; justify-content: flex-end; align-items: stretch; }
+  .talk-hint { flex: 1; min-width: 0; max-width: none; padding: 7px 10px; font-size: 16px; gap: 3px; }
+  .talk-hint span { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
   .tool.wide-tool { height: 60px; padding: 6px 12px; }
   .tool.wide-tool span { font-size: 8px; }
   .party { grid-template-columns: 1fr; }

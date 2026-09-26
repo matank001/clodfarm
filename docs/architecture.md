@@ -41,6 +41,7 @@ container (user "farm", tini as PID 1)
 | `SLOT` | `<seat>#000..` | Per-seat concurrency slots with leases, shared by every box on that seat. |
 | `SPEND` | `<seat>#<day>` | API-mode list-price spend per seat and day. |
 | `CONTROL` | `GLOBAL` / `PLANNER` | The pause switch; planner single-flight and back-off. |
+| `SCHEDULE` | `<id>` | A scheduled task (cron + time zone, every N seconds, or once at a time) and its next run. |
 | `WORKER` | `<farm>/<worker>` | Heartbeats (TTL 1 day). |
 | `EVENT#<day>` | `<ts>#<rand>` | Event log (TTL 30 days). |
 

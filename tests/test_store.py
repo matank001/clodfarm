@@ -188,3 +188,36 @@ def test_finishing_a_task_that_is_no_longer_yours_is_a_no_op(store):
     assert store.finish(t["id"], "w1", False, "late farm error", 5) == "done"
     assert store.get_task(t["id"])["status"] == "done"
     assert len(store.events(limit=500)) == before, "no misleading task.retry event"
+
+
+def test_task_for_one_claude_is_only_taken_by_it(store):
+    t = store.add_task("review it, gil", "x", to="gil")
+    other = store.add_task("anyone", "x")
+    assert store.claim_next("matan@h/w0", 60, "matan@h", agent="matan")["id"] == other["id"]
+    assert store.claim_next("matan@h/w1", 60, "matan@h", agent="matan") is None
+    assert store.claim_next("gil@h/w0", 60, "gil@h", agent="gil")["id"] == t["id"]
+
+
+def test_schedules_fire_once_per_due_time_on_any_box(store):
+    import clodfarm.store as st
+    t0 = now()
+    every = store.add_schedule("standup notes", "x", every=3600, to="gil")
+    once = store.add_schedule("launch check", "x", at=t0 + 120)
+    cron = store.add_schedule("weekday report", "x", cron="0 9 * * 1-5", tz="Europe/Berlin")
+    assert abs(every["next_at"] - (t0 + 3600)) < 5 and once["next_at"] == t0 + 120 and cron["next_at"] > t0
+    with pytest.raises(ValueError):
+        store.add_schedule("never", "x", at=t0 - 10)
+    with pytest.raises(ValueError):
+        store.add_schedule("bad", "x", cron="61 * * * *")
+    real = st.now
+    try:
+        st.now = lambda: t0 + 3700  # an hour later: two boxes check at once
+        fired = store.fire_due() + store.fire_due()
+        assert sorted(f["title"] for f in fired) == ["launch check", "standup notes"]
+        assert next(f for f in fired if f["title"] == "standup notes")["to"] == "gil"
+        left = {s["title"]: s for s in store.schedules()}
+        assert "launch check" not in left and left["standup notes"]["runs"] == 1
+        assert left["standup notes"]["next_at"] > t0 + 3700
+    finally:
+        st.now = real
+    assert store.remove_schedule(cron["id"]) and not store.remove_schedule(cron["id"])

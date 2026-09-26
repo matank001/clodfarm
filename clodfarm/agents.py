@@ -20,6 +20,7 @@ import secrets
 import select
 import shutil
 import signal
+import socket
 import subprocess
 import sys
 import threading
@@ -137,6 +138,7 @@ class AgentManager:
         self.procs: dict[str, subprocess.Popen] = {}
         self.logins: dict[str, LoginSession] = {}
         self._auth_cache: dict[str, tuple[float, dict]] = {}
+        self.leaving: set[str] = set()  # being released: never (re)start these
         self._lock = threading.RLock()
         self.stopping = threading.Event()
 
@@ -182,20 +184,33 @@ class AgentManager:
         self.spawn(agent)
         return agent
 
+    def farm_id(self, aid: str) -> str:
+        return f"{aid}@{socket.gethostname()}"  # what its `clodfarm run` calls itself (Config.farm_id)
+
     def remove(self, aid: str):
+        """Release an agent: out of the registry first (so keep_alive can't bring it back), then stop its
+        `clodfarm run` (which hands its tasks back), then log it out and delete its login."""
         with self._lock:
             agent = self.get(aid)
             if not agent or agent.get("primary"):
                 raise ValueError("the primary agent is the farm itself; log it out with `clodfarm logout`")
+            self.leaving.add(aid)
+            self._save([a for a in self._load() if a["id"] != aid])
+        try:
             self.stop_proc(aid)
             s = self.logins.pop(aid, None)
             if s:
                 s.kill()
-            subprocess.run([self.cfg.claude_bin, "auth", "logout"], env=self.env_for(agent), capture_output=True,
-                           timeout=60, stdin=subprocess.DEVNULL)
+            try:
+                subprocess.run([self.cfg.claude_bin, "auth", "logout"], env=self.env_for(agent), capture_output=True,
+                               timeout=60, stdin=subprocess.DEVNULL)
+            except (OSError, subprocess.TimeoutExpired):
+                pass  # its login is deleted below either way
             if os.path.realpath(agent["config_dir"]).startswith(os.path.realpath(self.base) + os.sep):
                 shutil.rmtree(agent["config_dir"], ignore_errors=True)
-            self._save([a for a in self._load() if a["id"] != aid])
+            self._auth_cache.pop(aid, None)
+        finally:
+            self.leaving.discard(aid)
 
     # ------------------------------------------------------------ processes
     def env_for(self, agent: dict) -> dict:
@@ -211,6 +226,9 @@ class AgentManager:
         if agent.get("primary") or self.stopping.is_set():
             return
         with self._lock:
+            # the caller's copy may be stale: only start an agent that is still registered and not leaving
+            if agent["id"] in self.leaving or all(a["id"] != agent["id"] for a in self._load()):
+                return
             p = self.procs.get(agent["id"])
             if p and p.poll() is None:
                 return
@@ -231,7 +249,10 @@ class AgentManager:
         except (ProcessLookupError, PermissionError):
             pass
         except subprocess.TimeoutExpired:
-            os.killpg(p.pid, signal.SIGKILL)
+            try:
+                os.killpg(p.pid, signal.SIGKILL)
+            except (ProcessLookupError, PermissionError):
+                pass
 
     def keep_alive(self):
         """Start every added agent and restart any that exit (runs in a thread next to the UI)."""

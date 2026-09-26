@@ -275,3 +275,26 @@ def test_stopping_a_box_hands_its_running_task_back_at_once(env):
     assert task["status"] == "queued" and task["resume_reason"] == "restart", task
     assert int(task["attempts"]) == 0, "a restart doesn't cost an attempt"
     assert farm.store.slots() == [], "its slots are free immediately"
+
+
+def test_cli_hands_work_to_another_claude_and_schedules_it(env, monkeypatch):
+    monkeypatch.setenv("FARM_TICK_SECONDS", "1")
+    farm, t = start_farm()
+    try:
+        wait_for(lambda: farm.store.workers())
+        out = cli("agents").stdout
+        assert "test" in out and "(you)" in out
+        bad = cli("task", "add", "review", "--to", "gil", check=False)
+        assert bad.returncode == 2 and "no Claude named 'gil'" in bad.stderr
+        held = json.loads(cli("task", "add", "for gil later", "--to", "gil", "--force", "--json").stdout)
+        sch = json.loads(cli("schedule", "add", "tick", "--prompt", "say hi", "--at", "in 1m", "--json").stdout)
+        assert sch["next_at"] > time.time() + 50
+        farm.store.b.put({**farm.store.b.get("SCHEDULE", sch["id"]), "next_at": time.time()})  # make it due now
+        wait_for(lambda: any(x["title"] == "tick" and x["status"] == "done" for x in farm.store.list_tasks("done")))
+        assert "(no schedules)" in cli("schedule", "list").stdout  # a one-off is gone once it fired
+        every = json.loads(cli("schedule", "add", "digest", "--cron", "0 9 * * *", "--tz", "Asia/Jerusalem", "--json").stdout)
+        assert "cron '0 9 * * *' (Asia/Jerusalem)" in cli("schedule", "list").stdout
+        assert cli("schedule", "remove", every["id"]).returncode == 0
+        assert farm.store.get_task(held["id"])["status"] == "queued"  # nobody here is gil
+    finally:
+        stop_farm(farm, t)

@@ -10,15 +10,18 @@ The guide teaches them to:
   then end the run. They're resumed in the same session with the results. They never sleep or poll.
 - **Use built-in sub-agents** (Claude Code's Agent tool) for small parallel look-ups inside one run.
 - **Commit on their branch** and not push or merge. The farm does that.
-- **End with a plain summary.** That's what the parent task and the planner read.
+- **Hand work to another Claude** on the farm: `clodfarm agents`, then `clodfarm task add ... --to <name>`.
+- **Schedule work:** `clodfarm schedule add "<title>" --prompt "..." --cron "0 9 * * 1-5" --tz <zone>` (or
+  `--every 2h`, `--at "in 3h"`); `clodfarm schedule list` / `remove <id>`.
+- **End with a plain summary.** That's what the person, the parent task or the planner reads.
 - **Check `clodfarm budget`** before queueing a large batch. They leave pacing to the governor instead of
   rationing themselves.
 - **Stay safe:** never touch credentials; no messages, payments, account creation or public posts unless the
   mission says so.
 
-## MISSION.md
+## MISSION.md (optional planner)
 
-Put a `MISSION.md` at the root of the work repo (or at `/workspace/MISSION.md`). When the queue is empty and there's
+The planner is off by default: you talk to your Claude instead. Turn it on with `FARM_PLANNER=1` and put a `MISSION.md` at the root of the work repo (or at `/workspace/MISSION.md`). When the queue is empty and there's
 budget, **one** planner run (single-flight across all boxes, at most once per `FARM_PLANNER_COOLDOWN`) reads:
 - the mission;
 - the last 15 finished and 5 failed tasks with their results;

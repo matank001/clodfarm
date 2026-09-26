@@ -1,4 +1,4 @@
-"""The farm UI: a pixel-art farm where you watch your Claude agents work, read the quest log and hatch new agents.
+"""The farm UI: a pixel-art farm where you watch your Claude agents work and hatch (or release) new ones.
 
     clodfarm ui            serve it on its own (the farm daemon also serves it when FARM_UI=1, the default)
     clodfarm ui-passwd     set the UI password
@@ -22,6 +22,7 @@ import mimetypes
 import os
 import re
 import secrets
+import socket
 import threading
 import time
 from http import HTTPStatus
@@ -134,14 +135,6 @@ class Auth:
 
 
 # ---------------------------------------------------------------------- state
-def _first_line(text: str) -> str:
-    for line in text.splitlines():
-        line = line.strip().lstrip("#").strip()
-        if line:
-            return line[:160]
-    return ""
-
-
 def _public_task(t: dict, full: bool = False) -> dict:
     keep = ["id", "title", "status", "priority", "kind", "parent", "children", "depth", "created", "updated",
             "started", "finished", "attempts", "max_attempts", "worker", "branch", "created_by", "children_open"]
@@ -161,10 +154,6 @@ class FarmUI:
         self.auth = Auth(os.path.join(cfg.workspace, ".farm", "ui-auth.json"))
         self._state_cache: tuple[float, dict] | None = None
         self._lock = threading.Lock()
-
-    def mission(self) -> str:
-        p = next((p for p in self.cfg.mission_paths if os.path.isfile(p)), None)
-        return open(p).read() if p else ""
 
     def state(self) -> dict:
         with self._lock:
@@ -201,28 +190,37 @@ class FarmUI:
             known |= {w["SK"] for w in mine}
             seat = next((w.get("seat") for w in mine if w.get("seat")), None)
             agents.append(self._agent_view(a, st, mine, seat, seats, titles))
-        # boxes elsewhere in a multi-box farm: visitors you can watch but not manage here
+        # boxes elsewhere in a multi-box farm: visitors you can watch but not manage here. A box on this host
+        # that isn't registered is an agent that was released: its last heartbeats are not a visitor.
         others: dict[str, list] = {}
+        here, ids = "@" + socket.gethostname(), {a["id"] for a in self.manager.all()}
         for w in workers:
-            if w["SK"] not in known:
-                others.setdefault(w["SK"].split("/")[0], []).append(w)
+            box = w["SK"].split("/")[0]
+            if w["SK"] in known or (box.endswith(here) and box[: -len(here)] not in ids):
+                continue
+            others.setdefault(box, []).append(w)
         for farm_id, ws in sorted(others.items()):
             seat = next((w.get("seat") for w in ws if w.get("seat")), None)
             a = {"id": farm_id, "name": farm_id.split("@")[0], "primary": False, "remote": True, "hat": "cap"}
             agents.append(self._agent_view(a, {"loggedIn": True}, ws, seat, seats, titles))
         ctl = store.control()
-        mission = self.mission()
+        rc = {}  # each Claude's newest Remote Control link: talk to it from the Claude app
+        for e in store.events(now() - 7 * 86400, 5000):
+            m = re.match(r"Remote Control '([^']+)' is live: (https://\S+)", e["msg"]) if e["type"] == "rc.connected" else None
+            if m:
+                rc[m.group(1)] = m.group(2)
+        for a in agents:
+            a["remote_control"] = rc.get(a["id"]) or rc.get(a["name"])
         return {
             "farm": self.cfg.name, "version": __version__, "now": now(),
             "paused": bool(ctl.get("paused")), "pause_reason": ctl.get("reason") or "",
-            "mission": mission, "goal": _first_line(mission),
             "counts": {s: store.count(s) for s in ("queued", "running", "waiting", "done", "failed")},
             "agents": agents,
             "tasks": {"running": [_public_task(t) for t in running],
                       "waiting": [_public_task(t) for t in store.list_tasks("waiting", 30)],
                       "queued": [_public_task(t) for t in store.list_tasks("queued", 40)],
-                      "done": [_public_task(t) for t in store.list_tasks("done", 30)],
-                      "failed": [_public_task(t) for t in store.list_tasks("failed", 20)]},
+                      "done": [_public_task(t) for t in store.list_tasks("done", 12)],
+                      "failed": [_public_task(t) for t in store.list_tasks("failed", 4)]},
             "events": [{"at": e["at"], "type": e["type"], "msg": e["msg"][:240], "task": e.get("task")}
                        for e in store.events(now() - 3 * 86400, 40)],
         }
@@ -361,15 +359,6 @@ def make_handler(ui: FarmUI):
                     return self._err(401, "log in first")
                 if path == "/api/state":
                     return self._json(ui.state())
-                m = re.fullmatch(r"/api/tasks/([A-Za-z0-9]+)", path)
-                if m:
-                    t = ui.store.get_task(m.group(1))
-                    if not t:
-                        return self._err(404, "no such task")
-                    runs = [{k: r.get(k) for k in ("started", "duration_s", "ok", "turns", "output_tokens",
-                                                   "cost_usd_list_price", "terminal_reason", "worker")}
-                            for r in ui.store.runs(t["id"])]
-                    return self._json({**_public_task(t, full=True), "runs": runs})
                 m = re.fullmatch(r"/api/agents/([a-z0-9@._-]+)/login", path)
                 if m:
                     s = ui.manager.login(m.group(1))
@@ -411,30 +400,6 @@ def make_handler(ui: FarmUI):
         def _post(self, path: str, data: dict):
             store, mgr = ui.store, ui.manager
             ui._state_cache = None
-            if path == "/api/tasks":
-                text = str(data.get("text") or data.get("prompt") or data.get("title") or "").strip()
-                if not text:
-                    raise ValueError("write what the quest is")
-                first = _first_line(text)
-                title = first if len(first) <= 90 else first[:88].rsplit(" ", 1)[0] + "…"
-                prio = max(0, min(9, int(data.get("priority", 5))))
-                t = store.add_task(title, text[:20000], priority=prio,
-                                   created_by="human", max_depth=ui.cfg.max_depth, max_attempts=ui.cfg.max_attempts)
-                return self._json(_public_task(t))
-            m = re.fullmatch(r"/api/tasks/([A-Za-z0-9]+)/(cancel|retry)", path)
-            if m:
-                ok = store.cancel(m.group(1)) if m.group(2) == "cancel" else store.retry(m.group(1))
-                return self._json({"ok": ok}, 200 if ok else 409)
-            if path == "/api/mission":
-                from . import gitops
-                text = str(data.get("text", "")).strip()
-                if not text:
-                    raise ValueError("the mission is empty")
-                if not os.path.isdir(ui.cfg.repo_dir):
-                    raise ValueError("the workspace repo doesn't exist yet: log in the first agent so the farm starts")
-                gitops.write_mission(ui.cfg.repo_dir, text[:20000])
-                store.event("mission.set", _first_line(text)[:200], by="ui")
-                return self._json({"ok": True})
             if path == "/api/pause":
                 store.set_paused(True, str(data.get("reason") or "paused from the farm UI")[:200], by="ui")
                 return self._json({"ok": True})
@@ -465,7 +430,9 @@ def make_handler(ui: FarmUI):
                         s.kill()
                     return self._json({"ok": True})
                 mgr.remove(aid)
-                store.event("agent.removed", f"{aid} released from the farm UI", by="ui")
+                back = store.forget_box(mgr.farm_id(aid))  # its workers leave with it; its tasks go back
+                store.event("agent.removed", f"{aid} released from the farm UI"
+                            + (f"; {back} task(s) back in the queue" if back else ""), by="ui")
                 return self._json({"ok": True})
             return self._err(404, "not found")
 
