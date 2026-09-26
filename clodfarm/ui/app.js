@@ -249,12 +249,12 @@ function layoutWorld(W, H, opts = {}) {
   barn.x = opts.barnRight && !portrait ? play.x1 - barn.w - 6 : play.x0 + 6; barn.y = play.y0 - 6;
   const board = { x: opts.barnRight && !portrait ? barn.x - 36 : barn.x + barn.w + 10, y: barn.y + 16, w: 26, h: 20 };
   // opts.clearCenter keeps the middle free for a title (the landing page): the field goes to the right
-  const reserve = opts.reserve && !portrait ? opts.reserve : null;
-  const cols = portrait || reserve ? 2 : (play.x1 - play.x0 > 300 ? 4 : 3), rows = portrait || reserve ? 3 : 2;
+  const reserve = opts.reserve || null;
+  const cols = portrait || reserve ? 2 : (play.x1 - play.x0 > 300 ? 4 : 3), rows = portrait && reserve ? 2 : portrait || reserve ? 3 : 2;
   const pw = 26, ph = 14, gx = 20, gy = 16;
   const fw = cols * pw + (cols - 1) * gx, fh = rows * ph + (rows - 1) * gy;
   const fx = portrait ? Math.round((W - fw) / 2 + 8) : reserve ? Math.round((reserve.x + reserve.w + play.x1) / 2 - fw / 2 + 6) : Math.round(play.x1 - fw - 12);
-  const fy = portrait ? Math.round(barn.y + barn.h + 34) : Math.round(Math.max((play.y0 + play.y1) / 2 - fh / 2 + 12, opts.barnRight ? barn.y + barn.h + 20 : 0));
+  const fy = portrait ? Math.round(reserve ? reserve.y + reserve.h + 14 : barn.y + barn.h + 34) : Math.round(Math.max((play.y0 + play.y1) / 2 - fh / 2 + 12, opts.barnRight ? barn.y + barn.h + 20 : 0));
   const plots = [];
   for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++)
     plots.push({ x: fx + c * (pw + gx), y: fy + r * (ph + gy), w: pw, h: ph, i: plots.length });
