@@ -5,6 +5,7 @@
 set -eu
 IMAGE="${CLAUDE_FARM_IMAGE:-ghcr.io/matank001/clodfarm:latest}"
 NAME="${CLAUDE_FARM_NAME:-clodfarm}"
+PORT="${FARM_UI_PORT:-8080}"
 
 say() { printf '\033[1;38;5;209m==>\033[0m %s\n' "$*"; }
 command -v docker >/dev/null 2>&1 || { echo "Docker is required: https://docs.docker.com/get-docker/"; exit 1; }
@@ -20,11 +21,21 @@ else
   # pass every FARM_* setting from your shell through (FARM_VERIFY_CMD, FARM_MAX_WORKERS, FARM_NOTIFY_URL, ...)
   for v in $(env | sed -n 's/^\(FARM_[A-Z0-9_]*\)=.*/\1/p'); do set -- "$@" -e "$v"; done
   docker run -d --name "$NAME" --hostname "${FARM_NAME:-$NAME}" --restart unless-stopped "$@" \
+    -p "127.0.0.1:$PORT:8080" \
     -e FARM_CONTAINER_NAME="$NAME" \
     -v clodfarm_claude-home:/home/farm/.claude -v clodfarm_workspace:/workspace \
     "$IMAGE" >/dev/null
 fi
 
+# the farm UI's password: FARM_UI_PASSWORD if you set one, else the one generated on first start (printed once)
+PW=""
+if [ -z "${FARM_UI_PASSWORD:-}" ]; then
+  i=0
+  while [ $i -lt 20 ] && [ -z "$PW" ]; do
+    PW=$(docker logs "$NAME" 2>&1 | sed -n 's/.*farm UI password: \([^ |]*\).*/\1/p' | tail -1)
+    [ -n "$PW" ] || { sleep 1; i=$((i + 1)); }
+  done
+fi
 if docker exec "$NAME" clodfarm whoami >/dev/null 2>&1; then
   say "Already logged in"
 else
@@ -32,9 +43,15 @@ else
   docker exec -it "$NAME" clodfarm login </dev/tty
 fi
 
+if [ -n "${FARM_UI_PASSWORD:-}" ]; then PWTXT="your FARM_UI_PASSWORD"
+elif [ -n "$PW" ]; then PWTXT="$PW"
+else PWTXT="set one with: docker exec -it $NAME clodfarm ui-passwd"; fi
+
 cat <<MSG
 
   clodfarm is running.
+
+  Farm UI:            http://localhost:$PORT   password: $PWTXT
 
   Give it a mission:  docker exec $NAME clodfarm mission "Build a CSV to Markdown CLI with tests"
   Or a single task:   docker exec $NAME clodfarm task add "Add a --align flag" --prompt "..."

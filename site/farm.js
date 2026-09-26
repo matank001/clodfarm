@@ -253,7 +253,8 @@ function layoutWorld(W, H, opts = {}) {
   const cols = portrait || reserve ? 2 : (play.x1 - play.x0 > 300 ? 4 : 3), rows = portrait && reserve ? 2 : portrait || reserve ? 3 : 2;
   const pw = 26, ph = 14, gx = 20, gy = 16;
   const fw = cols * pw + (cols - 1) * gx, fh = rows * ph + (rows - 1) * gy;
-  const fx = portrait ? Math.round((W - fw) / 2 + 8) : reserve ? Math.round((reserve.x + reserve.w + play.x1) / 2 - fw / 2 + 6) : Math.round(play.x1 - fw - 12);
+  const fx = portrait ? Math.round((W - fw) / 2 + 8)
+    : reserve ? Math.round(Math.min((reserve.x + reserve.w + play.x1) / 2 - fw / 2 + 6, play.x1 - fw - 4)) : Math.round(play.x1 - fw - 12);
   const fy = portrait ? Math.round(reserve ? reserve.y + reserve.h + 14 : barn.y + barn.h + 34) : Math.round(Math.max((play.y0 + play.y1) / 2 - fh / 2 + 12, opts.barnRight ? barn.y + barn.h + 20 : 0));
   const plots = [];
   for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++)
@@ -455,7 +456,12 @@ class Critter {
     this.moving = dist > 1.2;
     if (this.moving) {
       const sp = (this.mode === "work" ? 34 : this.speed) * dt * (REDUCED ? 0.7 : 1);
-      this.x += (dx / dist) * Math.min(sp, dist); this.y += (dy / dist) * Math.min(sp, dist);
+      const nx = this.x + (dx / dist) * Math.min(sp, dist), ny = this.y + (dy / dist) * Math.min(sp, dist);
+      const R = L.reserve, inside = (x, y) => R && x > R.x - 6 && x < R.x + R.w + 6 && y > R.y - 2 && y < R.y + R.h + 16;
+      if (!inside(nx, ny) || inside(this.x, this.y)) { this.x = nx; this.y = ny; }
+      else if (!inside(nx, this.y)) this.x = nx; // slide round the title instead of walking through it
+      else if (!inside(this.x, ny)) this.y = ny;
+      else if (this.mode === "wander") { const p = world.randomSpot(); this.tx = p.x; this.ty = p.y; }
       this.dir = Math.abs(dx) > 0.5 ? Math.sign(dx) : this.dir;
       this.phaseT += dt; if (this.phaseT > 0.16) { this.phaseT = 0; this.phase = this.phase === 1 ? 2 : 1; }
     } else {
@@ -783,6 +789,7 @@ const UI = {
     clearInterval(App.polling); App.polling = null;
     for (const d of $$("dialog[open]")) d.close();
     $("#hud").hidden = true; $("#title").hidden = false;
+    Scene.layout = { clearOf: ".title-card" }; Scene.resize(); // the demo Claudes keep off the title and the form
     Scene.demo = true; fill(Scene.labels, null); Scene.critters.clear(); Scene.plotTasks = []; Scene.boardCount = 3;
     App.seenAgents = null;
     const hats = ["straw", "beanie", "cap", "sprout", "bow", "headphones"];
@@ -791,6 +798,7 @@ const UI = {
   },
   showFarm() {
     $("#title").hidden = true; $("#hud").hidden = false;
+    Scene.layout = {}; Scene.resize();
     Scene.demo = false; Scene.critters.clear(); fill(Scene.labels, null);
     App.seenAgents = null; App.seenEvents = nowS() - 1;
     this.refresh(true);

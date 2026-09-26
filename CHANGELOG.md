@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.2.0 (2026-09-26)
 
 - **The farm UI** (`http://localhost:8080`, served by the daemon; `FARM_UI=0` turns it off). A pixel-art farm: every
   worker is a Claude critter that wanders, tends its task's crop at a terminal, or naps when the governor paces it.

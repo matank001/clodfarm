@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="assets/hero.svg" alt="clodfarm, a farm of Claude Code agents: rows of glowing terminal sprouts (Claude Code agents) growing in a field at night, a barn and silo holding the task queue, and a moon-shaped gauge showing 5-hour and weekly usage" width="100%">
+  <img src="assets/farm.png" alt="The clodfarm UI: a pixel-art farm where every Claude Code agent is a little Claude character. Some work at terminals beside crop plots, mini Claudes help as sub-agents, finished quests bloom, and a few nap by the barn while the budget governor paces them" width="100%">
 </p>
 
 <p align="center">
