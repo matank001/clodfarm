@@ -33,8 +33,13 @@ class RunResult:
     error_text: str = ""  # the result text when Claude Code reported an error
 
 
-def build_cmd(cfg, system_prompt: str, resume_session: str | None = None) -> list[str]:
-    cmd = [cfg.claude_bin, "-p", "--output-format", "stream-json", "--verbose",
+def session_name(cfg, what: str = "") -> str:
+    """How a farm session is named in the Claude app and claude.ai/code: always marked [clodfarm]."""
+    return f"[clodfarm] {cfg.name}" + (f" · {what}" if what else "")
+
+
+def build_cmd(cfg, system_prompt: str, resume_session: str | None = None, name: str = "") -> list[str]:
+    cmd = [cfg.claude_bin, "-p", "--output-format", "stream-json", "--verbose", "--name", name or session_name(cfg),
            "--model", cfg.model, "--permission-mode", cfg.permission_mode,
            "--append-system-prompt", system_prompt]
     if getattr(cfg, "task_budget_usd", 0) and cfg.policy.api_mode:

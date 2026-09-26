@@ -74,7 +74,7 @@ curl -fsSL https://raw.githubusercontent.com/matank001/clodfarm/main/scripts/ins
 ```
 
 It pulls the image, starts `clodfarm` (restarting on reboot), and opens the login: a URL you approve on any
-device, then paste the code back. Then open **Claude app → Code → clodfarm** on your phone and just talk to it:
+device, then paste the code back. Then open **Claude app → Code → [clodfarm] clodfarm** on your phone and just talk to it:
 "add CSV export to the report page", "have gil's Claude review it", "every morning at 9, triage new issues".
 Or from a shell:
 

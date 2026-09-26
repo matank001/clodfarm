@@ -825,7 +825,7 @@ const UI = {
       h("span", { class: "chip" }, "SUB-AGENTS ", h("b", { text: String(busy) }), waiting ? [" · WAITING ", h("b", { text: String(waiting) })] : null),
     ];
     const me = st.agents.find(a => a.primary);
-    $("#talk-name").textContent = me?.name || st.farm;
+    $("#talk-name").textContent = `[clodfarm] ${me?.name || st.farm}`;
     $("#talk-hint").href = me?.remote_control || "https://claude.ai/code";
     $("#talk-hint").hidden = !st.agents.some(a => a.loggedIn); // first log a Claude in (the egg)
     if (st.paused) chips.push(h("span", { class: "chip warn" }, "⏸ PAUSED: " + (st.pause_reason || "").slice(0, 40).toUpperCase()));
@@ -950,8 +950,8 @@ const UI = {
       a.stats ? [h("dt", { text: "RAN (7D)" }), h("dd", { text: `${a.stats.ran} sub-agents · ${a.stats.done} done · ${a.stats.failed} failed` })] : null)];
     if (a.loggedIn) parts.push(h("h3", { text: "TALK TO IT" }), a.remote_control
       ? [h("a", { class: "btn primary login-link", href: a.remote_control, target: "_blank", rel: "noopener noreferrer" }, "OPEN IN THE CLAUDE APP ↗"),
-        h("p", { class: "muted small", text: `Or open the Claude app, go to Code and pick “${a.name}”. It starts sub-agents, asks the other Claudes for help and schedules work, and it watches its budget.` })]
-      : h("p", { class: "muted small", text: a.remote ? "It lives on another box: talk to it from its own Claude app." : "Its Remote Control session is starting. It shows up in the Claude app under Code." }));
+        h("p", { class: "muted small", text: `Or open the Claude app, go to Code and pick “[clodfarm] ${a.name}”. It starts sub-agents, asks the other Claudes for help and schedules work, and it watches its budget.` })]
+      : h("p", { class: "muted small", text: a.remote ? "It lives on another box: talk to it from its own Claude app." : `Its Remote Control session is starting. It shows up in the Claude app under Code as “[clodfarm] ${a.name}”.` }));
     parts.push(h("h3", { text: "BUDGET LEFT" }), this.hp("5H", b.five_hour, b.five_hour_resets), this.hp("7D", b.seven_day, b.seven_day_resets),
       h("p", { class: "muted small", text: b.measured ? `Measured ${ago(b.measured)}. ` + (b.can_start ? `It can start ${b.can_start} more sub-agent${b.can_start === 1 ? "" : "s"} now.` : `No new sub-agents on its account now: ${b.reason}.`)
         : "Measuring its usage…" }));

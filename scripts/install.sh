@@ -53,7 +53,7 @@ cat <<MSG
 
   Farm UI:            http://localhost:$PORT   password: $PWTXT
 
-  Talk to it:         Claude app -> Code -> "clodfarm" (on your phone or at claude.ai/code)
+  Talk to it:         Claude app -> Code -> "[clodfarm] $NAME" (on your phone or at claude.ai/code)
   Add teammates:      in the farm UI, + NEW CLAUDE: each logs in with their own account
   Watch it:           docker exec $NAME clodfarm status      (or the farm UI, or: docker logs -f $NAME)
 

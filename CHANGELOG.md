@@ -16,6 +16,8 @@ One Claude per account, sub-agents you can see, and Claudes that work together.
   every `FARM_USAGE_REFRESH` seconds (300); runs keep reporting it live.
 - **Removed:** the planner, `MISSION.md`, `clodfarm mission`, `FARM_PLANNER*`, `FARM_MISSION` and the
   `clodfarm task ...` commands (use `spawn` / `subagents` / `result`). `schedule add --to` is now `--on`.
+- **Every farm session is marked `[clodfarm]`** in the Claude app and claude.ai/code: the Remote Control session
+  (`[clodfarm] <name>`), the sessions you open from it, and each sub-agent (`[clodfarm] <name> · <job>`).
 - The README has a new architecture picture, drawn with the farm's own sprites (`scripts/architecture.html`).
 
 ## 0.3.0 (2026-09-26)

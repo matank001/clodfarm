@@ -25,7 +25,7 @@ from . import gitops, notify, prompts
 from .auth import accept_remote_control, auth_status, banner, install_guide, install_hooks, seat_id, trust_directory
 from .config import Config, load
 from .governor import Snapshot, decide
-from .runner import build_cmd, run_agent
+from .runner import build_cmd, run_agent, session_name
 from .store import Store, iso, now
 
 
@@ -152,7 +152,9 @@ class Farm:
     def remote_control_loop(self):
         backoff = 10
         while not self.stop.is_set():
-            cmd =[self.cfg.claude_bin, "remote-control", "--name", self.cfg.name, "--spawn", self.cfg.rc_spawn,
+            # the session and every one you open from the app are marked [clodfarm], so they stand out in the app
+            cmd = [self.cfg.claude_bin, "remote-control", "--name", session_name(self.cfg),
+                   "--remote-control-session-name-prefix", session_name(self.cfg), "--spawn", self.cfg.rc_spawn,
                    "--capacity", str(self.cfg.rc_capacity), "--permission-mode", self.cfg.permission_mode]
             t0 = now()
             try:
@@ -202,7 +204,8 @@ class Farm:
     def measure_usage(self) -> bool:
         env = {**os.environ, "FARM_TASK_ID": "usage", "FARM_WORKER_ID": f"{self.cfg.farm_id}/usage"}
         try:
-            res = run_agent(build_cmd(self.cfg, "Answer in one word."), "Reply with: ok", self.cfg.workspace, env, 180,
+            res = run_agent(build_cmd(self.cfg, "Answer in one word.", name=session_name(self.cfg, "usage check")),
+                            "Reply with: ok", self.cfg.workspace, env, 180,
                             on_snapshot=lambda sn: self.store.put_snapshot(sn, self.seat),
                             on_start=lambda p: self.procs.__setitem__("usage", p))
         finally:
@@ -301,6 +304,7 @@ class Farm:
         env = {**os.environ, "FARM_TASK_ID": tid, "FARM_WORKER_ID": f"{cfg.farm_id}/{wid}",
                "FARM_OWNER": task.get("owner") or cfg.name}  # its own sub-agents and messages speak for its Claude
         sysprompt = prompts.task_system_prompt(cfg, task, cwd, branch)
+        name = f"[clodfarm] {task.get('owner') or cfg.name} · {task['title'][:60]}"
 
         keep = threading.Event()
 
@@ -315,11 +319,11 @@ class Farm:
         on_snap = lambda sn: store.put_snapshot(sn, self.seat)  # noqa: E731
         started = now()
         try:
-            res = run_agent(build_cmd(cfg, sysprompt, session), prompt, cwd, env, cfg.task_timeout,
+            res = run_agent(build_cmd(cfg, sysprompt, session, name), prompt, cwd, env, cfg.task_timeout,
                             on_snapshot=on_snap, on_start=lambda p: self.procs.__setitem__(tid, p))
             if session and not res.ok and res.num_turns == 0 and "conversation" in res.text.lower():
                 # session file gone (e.g. new container): start fresh with full context
-                res = run_agent(build_cmd(cfg, sysprompt), task["prompt"] + "\n\n---\n" + prompt, cwd, env,
+                res = run_agent(build_cmd(cfg, sysprompt, name=name), task["prompt"] + "\n\n---\n" + prompt, cwd, env,
                                 cfg.task_timeout, on_snapshot=on_snap, on_start=lambda p: self.procs.__setitem__(tid, p))
         finally:
             keep.set()

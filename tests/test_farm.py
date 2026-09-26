@@ -80,7 +80,7 @@ def test_remote_control_is_kept_running(env):
     try:
         rc = wait_for(lambda: [c for c in calls(env) if c["cmd"] == "remote-control"])
         argv = rc[0]["argv"]
-        assert argv[argv.index("--name") + 1] == "test" and "--spawn" in argv
+        assert argv[argv.index("--name") + 1] == "[clodfarm] test" and "--spawn" in argv
     finally:
         stop_farm(farm, t)
 
@@ -284,5 +284,19 @@ def test_a_new_claude_measures_its_usage_at_once_and_reads_its_messages(env, mon
         assert cli("inbox", "--hook").stdout == ""  # delivered once
         assert cli("inbox", "--hook", extra_env={"FARM_TASK_ID": "x"}).stdout == ""  # never inside a sub-agent
         assert "5h 58% left" in cli("agents").stdout
+    finally:
+        stop_farm(farm, t)
+
+
+def test_every_farm_session_is_marked_clodfarm(env):
+    farm, t = start_farm()
+    try:
+        tid = json.loads(cli("spawn", "name me", "--prompt", "COMMIT named", "--json").stdout)["id"]
+        wait_for(lambda: farm.store.get_task(tid)["status"] == "done")
+        rc = wait_for(lambda: [c for c in calls(env) if c["cmd"] == "remote-control"])[0]["argv"]
+        assert rc[rc.index("--name") + 1] == "[clodfarm] test"
+        assert rc[rc.index("--remote-control-session-name-prefix") + 1] == "[clodfarm] test"
+        run = [c for c in calls(env) if c.get("task") == tid][0]["argv"]
+        assert run[run.index("--name") + 1] == "[clodfarm] test · name me"
     finally:
         stop_farm(farm, t)
