@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.1 (2026-09-26)
+
+- **Every Claude session and its whole conversation are in the farm's store.** A Claude Code hook (`clodfarm hook`,
+  installed in each Claude's settings) runs on session start, each prompt, each reply and session end: it registers
+  the session (which Claude, conversation or sub-agent, its task, its Remote Control session) and copies the new
+  transcript turns (your messages, Claude's replies, tool calls and results in short; thinking is left out). Read
+  them with `clodfarm sessions` / `clodfarm session ID`, or on each Claude's card in the farm UI. Messages from other
+  Claudes are delivered at the next real prompt (never used up by a session that gets none).
+- **Every farm session is marked `[clodfarm]`** in the Claude app and claude.ai/code: the Remote Control session
+  (`[clodfarm] <name>`), the sessions you open from it, and each sub-agent (`[clodfarm] <name> · <job>`).
+
 ## 0.4.0 (2026-09-26)
 
 One Claude per account, sub-agents you can see, and Claudes that work together.
@@ -16,14 +27,6 @@ One Claude per account, sub-agents you can see, and Claudes that work together.
   every `FARM_USAGE_REFRESH` seconds (300); runs keep reporting it live.
 - **Removed:** the planner, `MISSION.md`, `clodfarm mission`, `FARM_PLANNER*`, `FARM_MISSION` and the
   `clodfarm task ...` commands (use `spawn` / `subagents` / `result`). `schedule add --to` is now `--on`.
-- **Every Claude session and its whole conversation are in the farm's store.** A Claude Code hook (`clodfarm hook`,
-  installed in each Claude's settings) runs on session start, each prompt, each reply and session end: it registers
-  the session (which Claude, conversation or sub-agent, its task, its Remote Control session) and copies the new
-  transcript turns (your messages, Claude's replies, tool calls and results in short; thinking is left out). Read
-  them with `clodfarm sessions` / `clodfarm session ID`, or on each Claude's card in the farm UI. Messages from other
-  Claudes are delivered at the next real prompt (never used up by a session that gets none).
-- **Every farm session is marked `[clodfarm]`** in the Claude app and claude.ai/code: the Remote Control session
-  (`[clodfarm] <name>`), the sessions you open from it, and each sub-agent (`[clodfarm] <name> · <job>`).
 - The README has a new architecture picture, drawn with the farm's own sprites (`scripts/architecture.html`).
 
 ## 0.3.0 (2026-09-26)
