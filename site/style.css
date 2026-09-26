@@ -58,9 +58,9 @@ a { color: inherit; }
 .goal-text { font: 12px/1 var(--font-px); background: var(--sky-2); padding: 9px 12px; border: 2px solid var(--sky); border-left: 0; }
 
 /* ------------------------------------------------------------------ the card */
-.stage { position: relative; min-height: 100vh; display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; padding: 90px 16px 60px; pointer-events: none; }
-.card { min-width: 0; max-width: 100%; padding: 24px 26px 18px; text-align: center; }
-.hero { pointer-events: auto; width: min(620px, 100%); min-width: 0; display: grid; gap: 18px; }
+.stage { position: relative; min-height: 100vh; justify-items: center; display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; padding: 90px 16px 60px; pointer-events: none; }
+.card { min-width: 0; max-width: 100%; text-align: center; }
+.hero { pointer-events: auto; width: min(580px, 100%); min-width: 0; display: grid; gap: 18px; }
 .title { text-align: center; }
 .logo {
   font: 400 clamp(32px, 8vw, 58px)/1.1 var(--font-px); margin: 0 0 12px; color: #fff; letter-spacing: 1px;
@@ -97,7 +97,7 @@ a { color: inherit; }
 .btn:active { transform: translateY(3px); box-shadow: 0 1px 0 var(--ink); }
 .btn.primary { background: var(--clay); color: #fff; border-color: #6b2f1f; box-shadow: 0 4px 0 #6b2f1f; }
 .btn.primary:hover { background: #e4865f; }
-.note { margin: 6px 0 0; font-size: 19px; color: #6b6f7c; }
+.note { display: inline-block; margin: 4px 0 0; padding: 3px 10px; font-size: 19px; color: #fff; background: rgba(25, 32, 14, .55); border-radius: 6px; }
 
 /* --------------------------------------------------------------------- FAQ */
 .faq { position: relative; width: min(760px, calc(100% - 32px)); margin: 0 auto 30px; padding: 26px 26px 14px; }
@@ -114,15 +114,9 @@ a { color: inherit; }
   background: rgba(22, 30, 12, .62); border-radius: 6px;
 }
 
-@media (min-width: 1100px) {
-  /* the card sits left, so the field (where the Claudes work) stays in view */
-  .stage { place-items: center start; padding-left: max(5vw, 40px); }
-  .hero { width: min(560px, 44vw); }
-  .goal { left: auto; right: 5vw; transform: none; }
 }
 @media (max-height: 760px) {
   .stage { padding-top: 70px; padding-bottom: 24px; }
-  .card { padding: 20px 24px 16px; }
   .hero { gap: 12px; }
   .logo { font-size: 40px; margin-bottom: 8px; }
   .explain { font-size: 21px; margin-bottom: 14px; }
@@ -131,7 +125,6 @@ a { color: inherit; }
 @media (max-width: 640px) {
   .goal { display: none; }
   .stage { padding-top: 24px; }
-  .card { padding: 22px 16px 18px; }
   .explain { font-size: 21px; }
   .install { flex-wrap: wrap; }
   .install code { flex-basis: calc(100% - 30px); }

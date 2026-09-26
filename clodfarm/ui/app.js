@@ -248,10 +248,12 @@ function layoutWorld(W, H, opts = {}) {
   const barn = { w: 46, h: 44 };
   barn.x = opts.barnRight && !portrait ? play.x1 - barn.w - 6 : play.x0 + 6; barn.y = play.y0 - 6;
   const board = { x: opts.barnRight && !portrait ? barn.x - 36 : barn.x + barn.w + 10, y: barn.y + 16, w: 26, h: 20 };
-  const cols = portrait ? 2 : (play.x1 - play.x0 > 300 ? 4 : 3), rows = portrait ? 3 : 2;
+  // opts.clearCenter keeps the middle free for a title (the landing page): the field goes to the right
+  const reserve = opts.reserve && !portrait ? opts.reserve : null;
+  const cols = portrait || reserve ? 2 : (play.x1 - play.x0 > 300 ? 4 : 3), rows = portrait || reserve ? 3 : 2;
   const pw = 26, ph = 14, gx = 20, gy = 16;
   const fw = cols * pw + (cols - 1) * gx, fh = rows * ph + (rows - 1) * gy;
-  const fx = portrait ? Math.round((W - fw) / 2 + 8) : Math.round(play.x1 - fw - 12);
+  const fx = portrait ? Math.round((W - fw) / 2 + 8) : reserve ? Math.round((reserve.x + reserve.w + play.x1) / 2 - fw / 2 + 6) : Math.round(play.x1 - fw - 12);
   const fy = portrait ? Math.round(barn.y + barn.h + 34) : Math.round(Math.max((play.y0 + play.y1) / 2 - fh / 2 + 12, opts.barnRight ? barn.y + barn.h + 20 : 0));
   const plots = [];
   for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++)
@@ -260,12 +262,12 @@ function layoutWorld(W, H, opts = {}) {
   const pond = { cx: play.x0 + 30, cy: play.y1 - 14, rx: 24, ry: 11 };
   const rest = { x: barn.x + 10, y: barn.y + barn.h + 12 };
   const door = { x: barn.x + barn.w / 2, y: barn.y + barn.h + 2 };
-  return { W, H, T, play, portrait, barn, board, plots, field, pond, rest, door, rocks: [] };
+  return { W, H, T, play, portrait, barn, board, plots, field, pond, rest, door, rocks: [], reserve };
 }
 
 function blocked(L, x, y) {
   const inR = (r, pad = 0) => x > r.x - pad && x < r.x + r.w + pad && y > r.y - pad && y < r.y + r.h + pad + 4;
-  if (inR(L.barn, 8) || inR(L.board, 6) || inR(L.field, 2)) return true;
+  if (inR(L.barn, 8) || inR(L.board, 6) || inR(L.field, 2) || (L.reserve && inR(L.reserve, 12))) return true;
   if (((x - L.pond.cx) / (L.pond.rx + 8)) ** 2 + ((y - L.pond.cy) / (L.pond.ry + 6)) ** 2 < 1) return true;
   return L.rocks.some(r => Math.abs(x - r.x) < r.w / 2 + 6 && y > r.y - 4 && y < r.y + r.h + 4);
 }
@@ -505,7 +507,13 @@ const Scene = {
     this.cv.width = W; this.cv.height = H;
     this.cv.style.width = W * S + "px"; this.cv.style.height = H * S + "px";
     this.ctx.imageSmoothingEnabled = false;
-    this.world = buildWorld(W, H, 7, this.layout || {});
+    const opts = { ...(this.layout || {}) };
+    const keep = opts.clearOf && document.querySelector(opts.clearOf);
+    if (keep) { // keep this element's area free of the field and the critters (in world pixels)
+      const r = keep.getBoundingClientRect();
+      opts.reserve = { x: Math.floor(r.left / S) - 10, y: Math.floor(r.top / S) - 4, w: Math.ceil(r.width / S) + 20, h: Math.ceil(r.height / S) + 8 };
+    }
+    this.world = buildWorld(W, H, 7, opts);
     this.world.randomSpot = () => this.randomSpot();
     this.world.restSpot = (c) => this.restSpot(c);
     for (const c of this.critters.values()) {
@@ -1085,7 +1093,7 @@ const UI = {
  * a new one arrives. No server, no data: just the renderer. */
 const Demo = {
   start() {
-    Scene.layout = { barnRight: true }; // the title and card sit on the left
+    Scene.layout = { clearOf: ".hero" }; // the title sits in the middle
     Scene.init();
     Scene.passive = true;
     this.t0 = nowS();
