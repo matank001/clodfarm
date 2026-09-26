@@ -177,6 +177,19 @@ class FarmUI:
         running = store.list_tasks("running", 50)
         titles = {t["id"]: t["title"] for t in running}
         seats = {r["seat"]: r for r in _seats(self.cfg, store)}
+        took, ended = {}, {}
+        for e in store.events(now() - 7 * 86400, 5000):
+            if e["type"] == "task.claimed" and " by " in e["msg"]:
+                took[e.get("task")] = e["msg"].split(" by ", 1)[1]
+            elif e["type"] in ("task.done", "task.failed"):
+                ended[e.get("task")] = e["type"][5:]
+        self._stats = {}
+        for tid, worker in took.items():
+            aid = worker.split("/")[0].split("@")[0]
+            st = self._stats.setdefault(aid, {"took": 0, "done": 0, "failed": 0})
+            st["took"] += 1
+            if tid in ended:
+                st[ended[tid]] += 1
         agents, known = [], set()
         for a in self.manager.all():
             st = self.manager.auth(a)
@@ -220,6 +233,7 @@ class FarmUI:
             "loggedIn": bool(st.get("loggedIn")), "email": st.get("email"), "plan": st.get("subscriptionType"),
             "via": st.get("via"), "alive": a.get("remote") or self.manager.alive(a["id"]), "seat": seat,
             "login": login.view() if login else None,
+            "stats": self._stats.get(a["id"].split("@")[0], {"took": 0, "done": 0, "failed": 0}),
             "workers": [{"id": w["SK"], "name": w["SK"].rsplit("/", 1)[-1], "state": w.get("state", ""),
                          "task": w.get("task"), "task_title": titles.get(w.get("task")), "at": w.get("at")}
                         for w in sorted(mine, key=lambda w: w["SK"])],
@@ -370,11 +384,13 @@ def make_handler(ui: FarmUI):
             store, mgr = ui.store, ui.manager
             ui._state_cache = None
             if path == "/api/tasks":
-                title = str(data.get("title", "")).strip()
-                if not title:
-                    raise ValueError("a quest needs a title")
+                text = str(data.get("text") or data.get("prompt") or data.get("title") or "").strip()
+                if not text:
+                    raise ValueError("write what the quest is")
+                first = _first_line(text)
+                title = first if len(first) <= 90 else first[:88].rsplit(" ", 1)[0] + "…"
                 prio = max(0, min(9, int(data.get("priority", 5))))
-                t = store.add_task(title[:300], str(data.get("prompt") or title)[:20000], priority=prio,
+                t = store.add_task(title, text[:20000], priority=prio,
                                    created_by="human", max_depth=ui.cfg.max_depth, max_attempts=ui.cfg.max_attempts)
                 return self._json(_public_task(t))
             m = re.fullmatch(r"/api/tasks/([A-Za-z0-9]+)/(cancel|retry)", path)

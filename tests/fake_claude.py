@@ -10,6 +10,7 @@ Behaviour is driven by words in the prompt, so tests can script agents:
   CACHE         leave an uncommitted __pycache__/cache.cpython-311.pyc behind, like a test run does
   FAIL          end with an error result whose text mentions a rate limit (it is not one)
   (resumed to fix a failing check: writes fixed.txt and commits it)
+FAKE_CHILD_SLOW=<s> makes SPAWNed sub-tasks take s seconds (for watching them in the farm UI).
 Utilization reported in each rate_limit_event comes from FAKE_UTIL_5H / FAKE_UTIL_7D.
 Every invocation is appended to $FAKE_CLAUDE_LOG (JSON lines) for assertions.
 """
@@ -85,7 +86,7 @@ def main(argv):
     m = re.search(r"SPAWN (\d+)", prompt)
     if m and not resumed:
         for i in range(int(m.group(1))):
-            farm_cli("task", "add", f"child {i}", "--prompt", f"COMMIT child{i}", "--parent", os.environ["FARM_TASK_ID"])
+            farm_cli("task", "add", f"child {i}", "--prompt", f"COMMIT child{i}" + (f" SLOW {os.environ['FAKE_CHILD_SLOW']}" if os.environ.get("FAKE_CHILD_SLOW") else ""), "--parent", os.environ["FARM_TASK_ID"])
         text = f"split into {m.group(1)} sub-tasks"
     m = re.search(r"PLAN (\d+)", os.environ.get("FAKE_PLAN", "")) if "farm's planner" in prompt else None
     if m:

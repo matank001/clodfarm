@@ -39,28 +39,10 @@
 
   <div class="chips" id="chips" aria-live="polite"></div>
 
-  <button id="menu-btn" class="menu-btn" type="button" aria-label="Menu" aria-haspopup="true">
-    <span></span><span></span><span></span>
-  </button>
-  <nav id="menu" class="panel menu" hidden aria-label="Farm menu">
-    <button type="button" data-act="quests">QUESTS</button>
-    <button type="button" data-act="party">PARTY</button>
-    <button type="button" data-act="hatch">HATCH</button>
-    <button type="button" data-act="new">NEW QUEST</button>
-    <button type="button" data-act="mission">MAIN QUEST</button>
-    <button type="button" data-act="journal">JOURNAL</button>
-    <button type="button" data-act="pause" id="menu-pause">PAUSE FARM</button>
-    <button type="button" data-act="logout">LOG OUT</button>
-    <button type="button" data-act="close">EXIT</button>
-  </nav>
 
   <div class="toolbar" role="toolbar" aria-label="Farm actions">
-    <div class="tool-grid">
-      <button type="button" class="tool" data-act="party" title="Party: your Claude agents (P)"><img alt="" data-icon="party"><span>PARTY</span></button>
-      <button type="button" class="tool" data-act="quests" title="Quest log: every task (Q)"><img alt="" data-icon="scroll"><span>QUESTS</span></button>
-      <button type="button" class="tool" data-act="hatch" title="Hatch a new Claude agent (H)"><img alt="" data-icon="egg"><span>HATCH</span></button>
-    </div>
-    <button type="button" class="tool round" data-act="new" title="Post a new quest (N)"><img alt="" data-icon="quill"><span>NEW QUEST</span></button>
+    <button type="button" class="tool wide-tool" data-act="hatch" title="Add a new Claude (C)"><img alt="" data-icon="egg"><span>+ NEW CLAUDE</span></button>
+    <button type="button" class="tool round" data-act="new" title="Give the farm a quest (N)"><img alt="" data-icon="quill"><span>NEW QUEST</span></button>
   </div>
 
   <div id="textbox" class="textbox" role="status" aria-live="polite">
@@ -82,27 +64,6 @@
   <button class="x" type="button" data-close aria-label="Close">✕</button>
 </dialog>
 
-<dialog id="dlg-party" class="panel dlg wide" aria-labelledby="party-h">
-  <h2 id="party-h">PARTY</h2>
-  <p class="muted">Every Claude account on this farm. Each one is paced on its own budget.</p>
-  <ul class="party" id="party-list"></ul>
-  <div class="dlg-actions"><button class="btn primary" type="button" data-act="hatch">+ HATCH A CLAUDE</button></div>
-  <button class="x" type="button" data-close aria-label="Close">✕</button>
-</dialog>
-
-<dialog id="dlg-quests" class="panel dlg wide" aria-labelledby="quests-h">
-  <h2 id="quests-h">QUEST LOG</h2>
-  <div class="tabs" role="tablist" id="quest-tabs">
-    <button role="tab" type="button" data-tab="active">ACTIVE</button>
-    <button role="tab" type="button" data-tab="queued">QUEUED</button>
-    <button role="tab" type="button" data-tab="done">DONE</button>
-    <button role="tab" type="button" data-tab="failed">FAILED</button>
-  </div>
-  <ul class="quest-list" id="quest-list" role="tabpanel"></ul>
-  <div class="dlg-actions"><button class="btn primary" type="button" data-act="new">+ NEW QUEST</button></div>
-  <button class="x" type="button" data-close aria-label="Close">✕</button>
-</dialog>
-
 <dialog id="dlg-quest" class="panel dlg wide" aria-labelledby="quest-title">
   <p class="kicker" id="quest-kicker"></p>
   <h2 id="quest-title"></h2>
@@ -114,13 +75,9 @@
 <dialog id="dlg-new" class="panel dlg" aria-labelledby="new-h">
   <h2 id="new-h">NEW QUEST</h2>
   <form id="new-form">
-    <label>TITLE<input name="title" maxlength="300" required placeholder="Add CSV export to the report page"></label>
-    <label>DETAILS <span class="muted">(optional: what done looks like)</span>
-      <textarea name="prompt" rows="6" placeholder="The full instructions for the agent. Leave empty to use the title."></textarea></label>
-    <label>PRIORITY <output id="prio-out">5</output>
-      <input name="priority" type="range" min="0" max="9" value="5"></label>
+    <textarea name="text" rows="7" required aria-label="The quest" placeholder="What should the Claudes do? e.g. Add CSV export to the report page, with tests."></textarea>
     <p class="form-error" role="alert"></p>
-    <div class="dlg-actions"><button class="btn primary" type="submit">▶ POST QUEST</button></div>
+    <div class="dlg-actions"><button class="btn primary" type="submit">▶ GO</button></div>
   </form>
   <button class="x" type="button" data-close aria-label="Close">✕</button>
 </dialog>
@@ -137,15 +94,10 @@
 </dialog>
 
 <dialog id="dlg-hatch" class="panel dlg" aria-labelledby="hatch-h">
-  <h2 id="hatch-h">HATCH A CLAUDE</h2>
+  <h2 id="hatch-h">NEW CLAUDE</h2>
   <div id="hatch-body"></div>
   <button class="x" type="button" data-close aria-label="Close">✕</button>
 </dialog>
 
-<dialog id="dlg-journal" class="panel dlg wide" aria-labelledby="journal-h">
-  <h2 id="journal-h">JOURNAL</h2>
-  <ol class="journal" id="journal-list"></ol>
-  <button class="x" type="button" data-close aria-label="Close">✕</button>
-</dialog>
 </body>
 </html>

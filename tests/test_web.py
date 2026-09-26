@@ -93,10 +93,10 @@ def test_quests_mission_pause(ui):
     base, farm_ui = ui
     call = client()
     login(call, base)
-    code, t, _ = call(base + "/api/tasks", {"title": "Plant tomatoes", "priority": 7})
+    code, t, _ = call(base + "/api/tasks", {"text": "Plant tomatoes\nin the south field", "priority": 7})
     assert code == 200 and t["status"] == "queued" and t["priority"] == 7
     code, d, _ = call(base + f"/api/tasks/{t['id']}")
-    assert d["prompt"] == "Plant tomatoes" and d["runs"] == []
+    assert d["title"] == "Plant tomatoes" and d["prompt"].endswith("south field") and d["runs"] == []
     assert call(base + f"/api/tasks/{t['id']}/cancel", {})[0] == 200
     assert farm_ui.store.get_task(t["id"])["status"] == "cancelled"
     os.makedirs(farm_ui.cfg.repo_dir, exist_ok=True)

@@ -92,6 +92,26 @@ function clawdGrid({ look = 0, legs = 0, blink = false, sleep = false, arms = 0 
   return g.map(r => r.join(""));
 }
 
+/** A sub-agent: a small Claude, 10 x 8, with a band in its agent's colour. */
+function miniSprite(color, { legs = 0, arms = 0, blink = false }) {
+  const key = `mini|${color}|${legs}|${arms}|${blink}`;
+  let c = spriteCache.get(key);
+  if (c) return c;
+  const rows = Array.from({ length: 8 }, () => Array(10).fill("."));
+  const set = (x, y, ch) => { if (x >= 0 && x < 10 && y >= 0 && y < 8) rows[y][x] = ch; };
+  for (let y = 0; y <= 5; y++) for (let x = 1; x <= 8; x++) {
+    if ((x === 1 || x === 8) && (y === 0 || y === 5)) continue;
+    set(x, y, x === 1 || x === 8 || y === 0 || y === 5 ? "o" : y === 1 ? "c" : x === 7 || y === 4 ? "s" : "b");
+  }
+  const ay = 2 - arms;
+  set(0, ay, "o"); set(0, ay + 1, "o"); set(9, ay, "o"); set(9, ay + 1, "o");
+  for (const x of [3, 6]) { set(x, blink ? 3 : 2, "e"); set(x, 3, "e"); }
+  [2, 4, 5, 7].forEach((x, i) => { const up = legs !== 0 && ((i % 2 === 0) === (legs === 1)); set(x, 6, up ? "o" : "d"); if (!up) set(x, 7, "o"); });
+  c = paint(rows.map(r => r.join("")), { ...CLAY, c: color }, 10);
+  spriteCache.set(key, c);
+  return c;
+}
+
 const HATS = {
   straw: { pal: { o: "#6b4f1d", a: "#f0cf7a", b: "#d2a94c", r: "#c0392b" }, rows: [
     "................", "......oooo......", ".....oaaaao.....", "....oaaaaaao....", "...orrrrrrrro...", "ooaaaaaaaaaaaaoo", ".oobbbbbbbbbboo."] },
@@ -419,7 +439,7 @@ class Critter {
     if (this.blinkT < 0) { this.blink = 0.14; this.blinkT = 2 + Math.random() * 4; }
     this.blink = Math.max(0, this.blink - dt);
     let goal = null;
-    if (this.mode === "work" && this.plot) goal = { x: this.plot.x - 7, y: this.plot.y + this.plot.h };
+    if ((this.mode === "work" || this.mode === "subwait") && this.spot) goal = this.spot;
     else if (this.mode === "sleep") goal = world.restSpot(this);
     else if (this.mode === "starting") goal = { x: L.door.x + ((hashStr(this.key) % 5) - 2) * 7, y: L.door.y + 8 };
     if (goal) { this.tx = goal.x; this.ty = goal.y; }
@@ -444,6 +464,8 @@ class Critter {
   }
   sprite(t) {
     if (this.kind === "egg") return EGG;
+    if (this.mini) return miniSprite(this.color, { legs: this.phase, blink: this.blink > 0 || this.mode === "subwait",
+      arms: this.mode === "work" && !this.moving && Math.floor(t * 6) % 2 ? 1 : 0 });
     const sleep = this.mode === "sleep" && !this.moving;
     const typing = this.mode === "work" && !this.moving;
     const cheer = performance.now() - this.born < 1800;
@@ -456,6 +478,7 @@ class Critter {
     if (this.kind === "egg") return 0;
     if (this.mode === "error") return -Math.abs(Math.sin(this.hop)) * 3;
     if (this.moving) return this.phase === 1 ? -1 : 0;
+    if (this.mini && this.mode === "subwait") return 0;
     if (this.mode === "sleep") return 1;
     return Math.sin(t * 2 + this.x) > 0.7 ? -1 : 0; // idle breathing
   }
@@ -507,14 +530,12 @@ const Scene = {
     let best = null;
     for (const c of this.critters.values()) {
       if (c.gone) continue;
-      const w = c.kind === "egg" ? 7 : 9;
-      if (p.x > c.x - w && p.x < c.x + w && p.y > c.y - 19 && p.y < c.y + 2 && (!best || c.y > best.y)) best = c;
+      const w = c.kind === "egg" ? 7 : c.mini ? 6 : 9, top = c.mini ? 10 : 19;
+      if (p.x > c.x - w && p.x < c.x + w && p.y > c.y - top && p.y < c.y + 2 && (!best || c.y > best.y)) best = c;
     }
     if (best) return { critter: best };
     const L = this.world.L;
     for (const [i, p2] of L.plots.entries()) if (p.x >= p2.x - 2 && p.x <= p2.x + p2.w + 2 && p.y >= p2.y - 10 && p.y <= p2.y + p2.h + 2 && this.plotTasks[i]) return { task: this.plotTasks[i] };
-    const b = L.board; if (p.x >= b.x - 2 && p.x <= b.x + b.w + 2 && p.y >= b.y - 4 && p.y <= b.y + b.h + 8) return { board: true };
-    const br = L.barn; if (p.x >= br.x && p.x <= br.x + br.w && p.y >= br.y && p.y <= br.y + br.h) return { barn: true };
     return null;
   },
   onMove(e) { if (this.demo) return; const r = this.hit(this.toLogical(e)); this.hover = r?.critter || null; this.cv.style.cursor = r ? "pointer" : "default"; },
@@ -524,8 +545,6 @@ const Scene = {
     if (!r) { this.selected = null; return; }
     if (r.critter) { this.selected = r.critter; UI.openCritter(r.critter); }
     else if (r.task) UI.openQuest(r.task);
-    else if (r.board) UI.openQuests("queued");
-    else if (r.barn) UI.openParty();
   },
   sparkle(x, y, n = 14, color) {
     for (let i = 0; i < n; i++) { const a = Math.random() * Math.PI * 2, s = 10 + Math.random() * 26;
@@ -545,7 +564,7 @@ const Scene = {
     // crops
     this.plotTasks.forEach((task, i) => {
       const p = L.plots[i]; if (!p || !task) return;
-      const stage = task.status === "done" ? "ripe" : task.status === "failed" ? "wilt"
+      const stage = task.status === "done" ? "ripe" : task.status === "waiting" ? "grow" : task.status === "failed" ? "wilt"
         : (nowS() - (task.started || task.updated || nowS())) < 120 ? "seed" : (nowS() - (task.started || 0)) < 900 ? "sprout" : "grow";
       for (let k = 0; k < 3; k++) drawCrop(g, p.x + 5 + k * 8, p.y + p.h - 3, stage, t + k, task.status === "done");
     });
@@ -570,16 +589,19 @@ const Scene = {
       const s = c.sprite(t), bob = Math.round(c.bob(t));
       const fade = c.gone ? clamp(1 - (performance.now() - c.gone) / 500, 0, 1) : clamp((performance.now() - c.born) / 350, 0, 1);
       g.globalAlpha = fade;
-      pxEllipse(g, Math.round(c.x), Math.round(c.y), c.kind === "egg" ? 5 : 7, 2, "rgba(20,28,10,.35)");
-      if (c.kind === "egg") {
+      pxEllipse(g, Math.round(c.x), Math.round(c.y), c.kind === "egg" ? 5 : c.mini ? 4 : 7, c.mini ? 1 : 2, "rgba(20,28,10,.35)");
+      if (c.mini) {
+        g.drawImage(s, Math.round(c.x - 5), Math.round(c.y - 8 + bob));
+        if (c.mode === "work" && !c.moving) { g.fillStyle = "#1b1f2a"; g.fillRect(Math.round(c.x + 3), Math.round(c.y - 4), 4, 3); g.fillStyle = Math.floor(t * 3) % 2 ? "#7cfc9a" : "#22303c"; g.fillRect(Math.round(c.x + 4), Math.round(c.y - 3), 2, 1); }
+      } else if (c.kind === "egg") {
         const wob = Math.floor(c.hop * 4) % 6 === 0 ? (Math.floor(c.hop * 8) % 2 ? 1 : -1) : 0;
         g.drawImage(s, Math.round(c.x - 6 + wob), Math.round(c.y - 12));
       } else {
         g.drawImage(s, Math.round(c.x - 8), Math.round(c.y - (HAT_H + 12) + 1 + bob));
-        if (c.mode === "work" && !c.moving) g.drawImage(Math.floor(t * 3) % 2 ? LAPTOP_ON : LAPTOP_OFF, Math.round(c.x + 4), Math.round(c.y - 6));
+        if (c.mode === "work" && !c.moving && !c.mini) g.drawImage(Math.floor(t * 3) % 2 ? LAPTOP_ON : LAPTOP_OFF, Math.round(c.x + 4), Math.round(c.y - 6));
       }
       g.globalAlpha = 1;
-      if (c === this.selected && !c.gone) { const ay = Math.round(c.y - 26 + Math.sin(t * 5) * 1.5); g.fillStyle = "#fff"; g.fillRect(c.x - 2, ay, 5, 1); g.fillRect(c.x - 1, ay + 1, 3, 1); g.fillRect(c.x, ay + 2, 1, 1); }
+      if (c === this.selected && !c.gone) { const ay = Math.round(c.y - (c.mini ? 14 : 26) + Math.sin(t * 5) * 1.5); g.fillStyle = "#fff"; g.fillRect(c.x - 2, ay, 5, 1); g.fillRect(c.x - 1, ay + 1, 3, 1); g.fillRect(c.x, ay + 2, 1, 1); }
     }
     for (const c of list) if (c.gone && performance.now() - c.gone > 520) { this.critters.delete(c.key); c.el?.remove(); c.tagEl?.remove(); }
     g.drawImage(w.fg, 0, 0);
@@ -587,7 +609,7 @@ const Scene = {
     const dk = this.darkness();
     if (dk > 0) {
       g.fillStyle = `rgba(16,22,58,${dk})`; g.fillRect(0, 0, W, H);
-      for (const c of list) if (c.mode === "work" && !c.moving) { g.fillStyle = "rgba(124,252,154,.25)"; g.fillRect(Math.round(c.x + 2), Math.round(c.y - 9), 12, 9); g.drawImage(LAPTOP_ON, Math.round(c.x + 4), Math.round(c.y - 6)); }
+      for (const c of list) if (c.mode === "work" && !c.moving && !c.mini) { g.fillStyle = "rgba(124,252,154,.25)"; g.fillRect(Math.round(c.x + 2), Math.round(c.y - 9), 12, 9); g.drawImage(LAPTOP_ON, Math.round(c.x + 4), Math.round(c.y - 6)); }
       if (this.fireflies.length < 18) this.fireflies.push({ x: Math.random() * W, y: Math.random() * H, p: Math.random() * 9 });
       for (const f of this.fireflies) { f.p += dt; f.x += Math.sin(f.p * 0.7) * 0.2; f.y += Math.cos(f.p * 0.5) * 0.15;
         if (Math.sin(f.p * 2) > 0.2) { g.fillStyle = "#fff6a8"; g.fillRect(Math.round(f.x), Math.round(f.y), 1, 1); g.fillStyle = "rgba(255,246,168,.25)"; g.fillRect(Math.round(f.x) - 1, Math.round(f.y) - 1, 3, 3); } }
@@ -609,7 +631,7 @@ const Scene = {
         if (c.el.dataset.sig !== sig) {
           c.el.dataset.sig = sig; c.el.className = "bubble" + (want.alert ? " alert" : ""); fill(c.el, h("img", { src: icon(want.icon), alt: "" }), want.text ? h("span", { text: want.text }) : null);
         }
-        const lift = c.kind === "egg" ? 16 : 25;
+        const lift = c.kind === "egg" ? 16 : c.mini ? 13 : 25;
         c.el.style.transform = `translate(${Math.round(c.x * S)}px, ${Math.round((c.y - lift) * S)}px) translate(-50%, -100%)`;
       } else if (c.el) { c.el.remove(); c.el = null; }
       const showTag = c.mode !== "sleep" || c === this.selected || c === this.hover; // nappers huddle: tags on hover
@@ -649,9 +671,24 @@ function reconcile(st) {
   }
   const L = Scene.world.L;
   const eggs = new Map([...Scene.critters.values()].filter(c => c.kind === "egg" && !c.gone).map(c => [c.agent.id, c]));
-  for (const [key, c] of Scene.critters) if (!want.has(key) && !c.gone) { c.gone = performance.now(); if (c.kind !== "egg") Scene.sparkle(c.x, c.y - 8, 8, "#d8e6c4"); }
-  const running = [...st.tasks.running].sort((a, b) => a.id < b.id ? -1 : 1);
-  const plotOf = new Map(running.map((t, i) => [t.id, L.plots[i]]));
+  const byId = new Map(["running", "waiting", "queued", "done", "failed"].flatMap(k => st.tasks[k]).map(t => [t.id, t]));
+  const rootOf = (t) => { let r = t, n = 0; while (r?.parent && byId.get(r.parent) && n++ < 6) r = byId.get(r.parent); return r; };
+  // one plot per top-level quest in progress; its sub-agents work around it
+  const tops = [...st.tasks.running, ...st.tasks.waiting].filter(t => !t.parent || !byId.has(t.parent)).sort((a, b) => a.id < b.id ? -1 : 1);
+  const plotOf = new Map(tops.map((t, i) => [t.id, L.plots[i]]));
+  const subSlot = new Map(); // plot -> next free spot index
+  const spotFor = (plot, main) => {
+    if (main) return { x: plot.x - 7, y: plot.y + plot.h };
+    const k = subSlot.get(plot) || 0; subSlot.set(plot, k + 1);
+    const spots = [[4, -2], [22, -2], [4, plot.h + 9], [22, plot.h + 9], [13, -2], [13, plot.h + 9], [33, 4], [33, plot.h + 2]];
+    const [dx, dy] = spots[k % spots.length];
+    return { x: plot.x + dx, y: plot.y + dy };
+  };
+  // quests waiting for a free Claude that belong to an active quest: little sub-agents standing by
+  for (const t of st.tasks.queued) {
+    const root = t.parent && rootOf(t);
+    if (root && root.id !== t.id && plotOf.has(root.id)) want.set("sub:" + t.id, { agent: { id: "sub", name: "sub-agent", workers: [] }, hat: "", color: "#9aa3b2", kind: "claude", mini: true, mode: "subwait", task: t, root });
+  }
   for (const [key, d] of want) {
     let c = Scene.critters.get(key);
     if (!c) {
@@ -666,19 +703,28 @@ function reconcile(st) {
       if (!first && !App.seenAgents.has(d.agent.id)) UI.say(d.kind === "egg" ? `An egg appeared! Tap it to hatch ${d.agent.name.toUpperCase()}.` : `A wild ${d.agent.name.toUpperCase()} appeared!`);
       else if (!first && egg && d.kind === "claude") UI.say(`${d.agent.name.toUpperCase()} hatched! Welcome to the farm.`);
     }
-    Object.assign(c, { kind: d.kind, agent: d.agent, worker: d.worker, hat: d.hat, color: d.color, mode: d.mode });
-    c.plot = d.worker?.task ? plotOf.get(d.worker.task) : null;
-    if (c.mode === "work" && !c.plot) c.mode = "wander";
-    const title = d.worker?.task_title || "";
-    c.label = d.kind === "egg" ? d.agent.name : (d.agent.workers.length > 1 && d.worker ? `${d.agent.name}·${d.worker.name}` : d.agent.name);
+    c.gone = 0;
+    Object.assign(c, { kind: d.kind, agent: d.agent, worker: d.worker, hat: d.hat, color: d.color, mode: d.mode, task: d.task || null });
+    const task = d.task || (d.worker?.task && byId.get(d.worker.task));
+    const root = task && rootOf(task);
+    c.mini = !!(d.mini || (task && task.parent && root && root.id !== task.id));
+    c.root = c.mini ? root : null;
+    if (d.worker?.task) c.task = task || null;
+    const plot = root && plotOf.get(root.id);
+    c.spot = plot ? spotFor(plot, !c.mini) : null;
+    if (c.mode === "work" && !c.spot) c.mode = "wander";
+    const title = task?.title || d.worker?.task_title || "";
+    c.label = c.mini ? "" : d.kind === "egg" ? d.agent.name : (d.agent.workers.length > 1 && d.worker ? `${d.agent.name}·${d.worker.name}` : d.agent.name);
     c.bubble = c.kind === "egg" ? { icon: d.agent.login?.state === "waiting_code" ? "dots" : "ask" }
       : c.mode === "work" ? { icon: d.worker?.task && st.tasks.running.find(t => t.id === d.worker.task)?.kind === "plan" ? "plan" : "terminal", title }
       : c.mode === "sleep" ? { icon: "zzz" } : c.mode === "rest" ? { icon: "pause" } : c.mode === "error" ? { icon: "alert", alert: true }
+      : c.mode === "subwait" ? { icon: "dots", title }
       : c.mode === "starting" ? { icon: "dots" } : c.mode === "offline" ? { icon: "alert", alert: true } : null;
   }
+  for (const [key, c] of Scene.critters) if (!want.has(key) && !c.gone) { c.gone = performance.now(); if (c.kind !== "egg") Scene.sparkle(c.x, c.y - 8, 8, "#d8e6c4"); }
   for (const a of st.agents) App.seenAgents.add(a.id);
   // the field: running first, then the latest harvest, then what wilted
-  const plots = [...running, ...st.tasks.done, ...st.tasks.failed.slice(0, 2)].slice(0, L.plots.length);
+  const plots = [...tops, ...st.tasks.done.filter(t => !t.parent), ...st.tasks.failed.filter(t => !t.parent).slice(0, 2)].slice(0, L.plots.length);
   Scene.plotTasks = plots;
   Scene.boardCount = st.counts.queued;
 }
@@ -698,7 +744,7 @@ const EVENT_TEXT = {
   "task.added": (e, T) => `New quest on the board: “${T(e)}”.`,
   "task.claimed": (e, T) => { const w = e.msg.split(" by ")[1] || ""; return `${w ? w.split("@")[0] + "·" + w.split("/").pop() : "A Claude"} took on “${T(e)}”.`; },
   "task.done": (e, T) => `★ Quest complete: “${T(e)}”!`,
-  "task.failed": (e, T) => `Quest failed: “${T(e)}”. Check the quest log.`,
+  "task.failed": (e, T) => `Quest failed: “${T(e)}”. Tap its plot to see why.`,
   "task.waiting": (e, T) => `“${T(e)}” split into sub-quests and waits for them.`,
   "task.resume": (e, T) => `Back to “${T(e)}”: its sub-quests are done.`,
   "task.cancelled": (e, T) => `Quest cancelled: “${T(e)}”.`,
@@ -715,7 +761,7 @@ const EVENT_TEXT = {
 };
 
 const UI = {
-  queue: [], typing: null, tab: "active", hatchFor: null, hatchPoll: null, questBack: null,
+  queue: [], typing: null, hatchFor: null, hatchPoll: null,
 
   // ------------------------------------------------------------ title / login
   async boot() {
@@ -752,13 +798,11 @@ const UI = {
     this.renderHud(st);
     if (first) this.welcome(st);
     else this.pushEvents(st);
-    if ($("#dlg-party").open) this.renderParty();
-    if ($("#dlg-quests").open) this.renderQuests();
     if ($("#dlg-summary").open && this.summaryKey) { const c = Scene.critters.get(this.summaryKey); if (c) this.renderSummary(c); }
   },
   welcome(st) {
     const live = st.agents.filter(a => a.loggedIn);
-    if (!live.length) { this.say(`Welcome to ${st.farm.toUpperCase()}! No Claude lives here yet. Tap HATCH to log in your first one.`); return; }
+    if (!live.length) { this.say(`Welcome to ${st.farm.toUpperCase()}! No Claude lives here yet. Tap the egg (or + NEW CLAUDE) to log in your first one.`); return; }
     const n = st.agents.reduce((s, a) => s + a.workers.length, 0);
     this.say(`Welcome back to ${st.farm.toUpperCase()}! ${n} Claude${n === 1 ? "" : "s"} on the farm, ${st.counts.running} quest${st.counts.running === 1 ? "" : "s"} in progress, ${st.counts.queued} on the board.`);
     if (!st.goal) this.say("There's no main quest yet. Tap GOAL to give the farm a mission.");
@@ -783,7 +827,6 @@ const UI = {
     ];
     if (st.paused) chips.push(h("span", { class: "chip warn" }, "⏸ PAUSED: " + (st.pause_reason || "").slice(0, 40).toUpperCase()));
     fill($("#chips"), ...chips);
-    $("#menu-pause").textContent = st.paused ? "RESUME FARM" : "PAUSE FARM";
   },
 
   // ---------------------------------------------------------------- textbox
@@ -823,9 +866,7 @@ const UI = {
       const act = e.target.closest("[data-act]")?.dataset.act;
       if (act) { this.act(act, e); return; }
       if (e.target.closest("[data-close]")) e.target.closest("dialog").close();
-      if (!e.target.closest("#menu, #menu-btn")) $("#menu").hidden = true;
     });
-    $("#menu-btn").addEventListener("click", (e) => { e.stopPropagation(); const m = $("#menu"); m.hidden = !m.hidden; if (!m.hidden) m.querySelector("button").focus(); });
     $("#goal").addEventListener("click", () => this.openMission());
     $("#textbox").addEventListener("click", () => this.skip());
     for (const d of $$("dialog")) {
@@ -835,12 +876,11 @@ const UI = {
       });
       d.addEventListener("close", () => { if (d.id === "dlg-hatch") this.stopHatchPoll(); if (d.id === "dlg-summary") { this.summaryKey = null; Scene.selected = null; } });
     }
-    $("#new-form [name=priority]").addEventListener("input", (e) => ($("#prio-out").textContent = e.target.value));
     $("#new-form").addEventListener("submit", async (e) => {
       e.preventDefault();
       const f = new FormData(e.target), err = e.target.querySelector(".form-error");
-      try { await api("/api/tasks", { title: f.get("title"), prompt: f.get("prompt") || f.get("title"), priority: +f.get("priority") });
-        $("#dlg-new").close(); e.target.reset(); $("#prio-out").textContent = "5"; this.refresh(); }
+      try { await api("/api/tasks", { text: f.get("text") });
+        $("#dlg-new").close(); e.target.reset(); this.say("Quest posted! A Claude picks it up soon."); this.refresh(); }
       catch (x) { err.textContent = x.message; }
     });
     $("#mission-form").addEventListener("submit", async (e) => {
@@ -849,24 +889,16 @@ const UI = {
       try { await api("/api/mission", { text: new FormData(e.target).get("text") }); $("#dlg-mission").close(); this.say("Main quest saved. The planner reads it when the board is empty."); this.refresh(); }
       catch (x) { err.textContent = x.message; }
     });
-    $("#quest-tabs").addEventListener("click", (e) => { const b = e.target.closest("[data-tab]"); if (b) { this.tab = b.dataset.tab; this.renderQuests(); } });
     addEventListener("keydown", (e) => {
-      if (e.key === "Escape") $("#menu").hidden = true;
       if ($("#hud").hidden || $$("dialog[open]").length || /INPUT|TEXTAREA/.test(document.activeElement?.tagName) || e.metaKey || e.ctrlKey || e.altKey) return;
-      const k = { n: "new", q: "quests", p: "party", h: "hatch", m: "mission", j: "journal" }[e.key.toLowerCase()];
+      const k = { n: "new", c: "hatch", h: "hatch", m: "mission" }[e.key.toLowerCase()];
       if (k) { e.preventDefault(); this.act(k); }
     });
   },
-  async act(a) {
-    $("#menu").hidden = true;
-    if (a === "quests") return this.openQuests();
-    if (a === "party") return this.openParty();
-    if (a === "hatch") return this.openHatch();
-    if (a === "new") { for (const d of $$("dialog[open]")) d.close(); $("#dlg-new").showModal(); $("#new-form [name=title]").focus(); return; }
+  act(a) {
+    if (a === "hatch") return this.openHatch(null, true);
+    if (a === "new") { for (const d of $$("dialog[open]")) d.close(); $("#new-form .form-error").textContent = ""; $("#dlg-new").showModal(); $("#new-form textarea").focus(); return; }
     if (a === "mission") return this.openMission();
-    if (a === "journal") return this.openJournal();
-    if (a === "pause") { const p = App.state?.paused; await api(p ? "/api/resume" : "/api/pause", {}); return this.refresh(); }
-    if (a === "logout") { await api("/api/logout", {}); return this.showTitle(); }
   },
 
   // ----------------------------------------------------------------- dialogs
@@ -890,24 +922,6 @@ const UI = {
     const busy = a.workers.filter(w => w.state === "running").length, sleep = a.workers.filter(w => (w.state || "").startsWith("throttled")).length;
     return `${busy}/${a.workers.length} WORKING` + (sleep ? ` · ${sleep} NAPPING (BUDGET)` : "");
   },
-  openParty() { for (const d of $$("dialog[open]")) d.close(); this.renderParty(); $("#dlg-party").showModal(); },
-  renderParty() {
-    const st = App.state; if (!st) return;
-    fill($("#party-list"), ...st.agents.map(a => {
-      const fake = { kind: a.loggedIn || a.remote ? "claude" : "egg", hat: a.hat, color: colorFor(a.id) };
-      const b = a.budget || {};
-      return h("li", { class: fake.kind === "egg" ? "egg" : "" }, h("button", { type: "button", onclick: () => this.openAgent(a.id) },
-        this.spriteCanvas(fake),
-        h("div", {},
-          h("div", { class: "pname" }, h("span", { text: a.name.toUpperCase() }), h("em", { text: a.primary ? "PRIMARY" : a.remote ? "OTHER BOX" : (a.plan || "").toUpperCase() })),
-          a.loggedIn ? [this.hp("5H", b.five_hour, b.five_hour_resets), this.hp("7D", b.seven_day, b.seven_day_resets)] : null,
-          h("div", { class: "pstate", text: this.agentState(a) }))));
-    }));
-  },
-  openAgent(id) {
-    const c = [...Scene.critters.values()].find(c => c.agent?.id === id && !c.gone);
-    if (c) this.openCritter(c);
-  },
   openCritter(c) {
     if (c.kind === "egg") return this.openHatch(c.agent.id);
     for (const d of $$("dialog[open]")) d.close();
@@ -916,81 +930,65 @@ const UI = {
     $("#dlg-summary").showModal();
   },
   renderSummary(c) {
-    const a = c.agent, w = c.worker, st = App.state, b = a.budget || {};
+    const st = App.state, sub = c.agent.id === "sub";
+    const a = sub ? null : st.agents.find(x => x.id === c.agent.id) || c.agent, w = c.worker, b = a?.budget || {};
+    const byId = new Map(["running", "waiting", "queued", "done", "failed"].flatMap(k => st.tasks[k]).map(t => [t.id, t]));
+    const task = c.task && (byId.get(c.task.id) || c.task);
     const g = $("#sum-sprite").getContext("2d"); g.imageSmoothingEnabled = false; g.clearRect(0, 0, 32, 32);
-    g.drawImage(critterSprite(c.hat, c.color, { legs: 0 }), 8, 8);
-    $("#sum-name").textContent = (w ? `${a.name} · ${w.name}` : a.name).toUpperCase();
-    $("#sum-sub").textContent = [a.plan && `Claude ${a.plan}`, a.email, a.primary ? "the farm's own login" : a.remote ? "on another box" : "hatched here"].filter(Boolean).join(" · ");
-    const task = w?.task && [...st.tasks.running, ...st.tasks.waiting].find(t => t.id === w.task);
-    const rows = [
-      ["STATE", (w?.state || this.agentState(a)).toUpperCase()],
-      ["QUEST", task ? h("a", { href: "#", onclick: (e) => { e.preventDefault(); this.openQuest(task); } }, task.title) : "—"],
-      ["SEAT", a.seat || "—"],
-      ["HEARTBEAT", w ? ago(w.at) : "—"],
-      ["GOVERNOR", b.reason ? `${b.allowed}/${b.max} allowed · ${b.reason}` : "—"],
-    ];
-    fill($("#sum-body"), 
-      h("dl", { class: "stat-row" }, rows.flatMap(([k, v]) => [h("dt", { text: k }), h("dd", {}, v)])),
-      h("h3", { text: "STAMINA (USAGE LEFT)" }), this.hp("5H", b.five_hour, b.five_hour_resets), this.hp("7D", b.seven_day, b.seven_day_resets));
+    if (c.mini) g.drawImage(miniSprite(c.color, {}), 11, 12); else g.drawImage(critterSprite(c.hat, c.color, { legs: 0 }), 8, 8);
+    $("#sum-name").textContent = sub ? "SUB-AGENT" : (c.mini ? `SUB-AGENT · ${a.name}` : w ? `${a.name} · ${w.name}` : a.name).toUpperCase();
+    $("#sum-sub").textContent = sub ? "Waiting for a free Claude to start it." : [a.plan && `Claude ${a.plan}`, a.email].filter(Boolean).join(" · ");
+    const doing = sub ? "WAITING" : !w ? this.agentState(a) : w.state === "running" ? "WORKING"
+      : (w.state || "").startsWith("throttled") ? "NAPPING: " + (b.reason || "paced by the budget") : (w.state || "").toUpperCase();
+    const kids = task ? (task.children || []).map(id => byId.get(id)).filter(Boolean) : [];
+    const parts = [h("dl", { class: "stat-row" },
+      h("dt", { text: "STATUS" }), h("dd", { text: doing }),
+      c.root && c.root.id !== task?.id ? [h("dt", { text: "HELPING ON" }), h("dd", {}, h("a", { href: "#", onclick: (e) => { e.preventDefault(); this.openQuest(c.root); } }, c.root.title))] : null,
+      !sub && a.stats ? [h("dt", { text: "QUESTS (7D)" }), h("dd", { text: `${a.stats.done} done · ${a.stats.failed} failed · ${a.stats.took} taken` })] : null,
+      w ? [h("dt", { text: "LAST SEEN" }), h("dd", { text: ago(w.at) })] : null)];
+    if (task) parts.push(h("h3", { text: "WORKING ON" }), h("a", { href: "#", class: "quest-text", onclick: (e) => { e.preventDefault(); this.openQuest(task); } }, task.title));
+    if (kids.length) parts.push(h("h3", { text: `SUB-AGENTS (${kids.length})` }), h("ul", { class: "subs" }, kids.map(k => h("li", {},
+      h("span", { class: `badge ${k.status}`, text: { running: "WORKING", queued: "WAITING", waiting: "WAITING", done: "DONE", failed: "FAILED", cancelled: "CANCELLED" }[k.status] || k.status.toUpperCase() }),
+      h("a", { href: "#", onclick: (e) => { e.preventDefault(); this.openQuest(k); } }, k.title)))));
+    if (!sub) parts.push(h("h3", { text: "BUDGET LEFT" }), this.hp("5H", b.five_hour, b.five_hour_resets), this.hp("7D", b.seven_day, b.seven_day_resets),
+      b.max ? h("p", { class: "muted small", text: `${b.allowed ?? "?"} of ${b.max} Claudes allowed to work right now` }) : null);
+    fill($("#sum-body"), parts);
     const acts = [];
-    if (task) acts.push(h("button", { class: "btn", type: "button", onclick: () => this.openQuest(task) }, "VIEW QUEST"));
-    if (!a.primary && !a.remote) {
+    if (a && !a.primary && !a.remote && !c.mini) {
       const rel = h("button", { class: "btn danger", type: "button" }, "RELEASE");
       rel.addEventListener("click", async () => {
         if (rel.dataset.sure !== "1") { rel.dataset.sure = "1"; rel.textContent = "SURE? LOGS IT OUT"; return; }
         rel.disabled = true; rel.textContent = "RELEASING…";
-        try { await api(`/api/agents/${a.id}/remove`, {}); $("#dlg-summary").close(); this.say(`${a.name.toUpperCase()} was released. Bye bye!`); this.refresh(); }
+        try { await api(`/api/agents/${a.id}/remove`, {}); $("#dlg-summary").close(); this.say(`${a.name.toUpperCase()} left the farm. Bye bye!`); this.refresh(); }
         catch (x) { rel.textContent = x.message.slice(0, 40); }
       });
       acts.push(rel);
     }
-    fill($("#sum-actions"), ...acts);
+    fill($("#sum-actions"), acts);
   },
 
-  openQuests(tab) { for (const d of $$("dialog[open]")) d.close(); if (tab) this.tab = tab; this.renderQuests(); $("#dlg-quests").showModal(); },
-  renderQuests() {
-    const st = App.state; if (!st) return;
-    const lists = { active: [...st.tasks.running, ...st.tasks.waiting], queued: st.tasks.queued, done: st.tasks.done, failed: st.tasks.failed };
-    for (const b of $$("#quest-tabs [data-tab]")) {
-      b.setAttribute("aria-selected", String(b.dataset.tab === this.tab));
-      fill(b, b.dataset.tab.toUpperCase(), h("span", { class: "n", text: String(lists[b.dataset.tab].length) }));
-    }
-    const items = lists[this.tab];
-    fill($("#quest-list"), ...(items.length ? items.map(t => h("li", {}, h("button", { type: "button", onclick: () => this.openQuest(t, "quests") },
-      h("span", {}, t.kind === "plan" ? "📜 " : "", t.title),
-      h("span", { class: "qmeta" }, h("span", { class: `badge ${t.status}`, text: t.status.toUpperCase() }), ` P${t.priority ?? 5} · ${ago(t.updated)}`),
-      t.summary ? h("span", { class: "qsub", text: t.summary.replace(/\s+/g, " ") }) : t.worker ? h("span", { class: "qsub", text: "tended by " + t.worker.split("/").pop() + " of " + t.worker.split("@")[0] }) : null)))
-      : [h("li", { class: "empty", text: { active: "Nobody is on a quest right now.", queued: "The quest board is empty. The planner fills it from the main quest.", done: "No harvest yet.", failed: "Nothing failed. Nice." }[this.tab] })]));
-  },
-  async openQuest(t, back) {
+  async openQuest(t) {
     for (const d of $$("dialog[open]")) d.close();
-    this.questBack = back || null;
-    $("#quest-kicker").textContent = `QUEST ${t.id} · ${t.status.toUpperCase()}`;
-    $("#quest-title").textContent = t.title;
+    const label = (s) => ({ running: "IN PROGRESS", queued: "WAITING FOR A CLAUDE", waiting: "SUB-AGENTS AT WORK", done: "DONE", failed: "FAILED", cancelled: "CANCELLED" }[s] || s.toUpperCase());
+    $("#quest-kicker").textContent = "QUEST · " + label(t.status);
     fill($("#quest-body"), h("p", { class: "muted", text: "Loading…" }));
-    fill($("#quest-actions"), null);
+    fill($("#quest-actions"));
     $("#dlg-quest").showModal();
     let d;
     try { d = await api(`/api/tasks/${t.id}`); } catch (x) { fill($("#quest-body"), h("p", { class: "form-error", text: x.message })); return; }
-    $("#quest-kicker").textContent = `QUEST ${d.id} · ${d.status.toUpperCase()}${d.kind && d.kind !== "task" ? " · " + d.kind.toUpperCase() : ""}`;
-    const rows = [["PRIORITY", `P${d.priority ?? 5}`], ["ATTEMPTS", `${d.attempts || 0} / ${d.max_attempts || 3}`], ["POSTED", `${ago(d.created)} by ${d.created_by || "human"}`]];
-    if (d.worker) rows.push(["TENDED BY", d.worker]);
-    if (d.branch) rows.push(["BRANCH", d.branch]);
-    if (d.parent) rows.push(["PARENT", d.parent]);
-    if (d.children?.length) rows.push(["SUB-QUESTS", d.children.join(", ")]);
-    const runs = (d.runs || []).slice(-8);
-    fill($("#quest-body"), 
-      h("dl", { class: "stat-row" }, rows.flatMap(([k, v]) => [h("dt", { text: k }), h("dd", { text: v })])),
-      h("h3", { text: "INSTRUCTIONS" }), h("pre", { text: d.prompt || "" }),
-      d.result ? [h("h3", { text: "RESULT" }), h("pre", { text: d.result })] : null,
-      runs.length ? [h("h3", { text: "RUNS" }), h("table", { class: "runs" }, h("tr", {}, ["WHEN", "OK", "TIME", "TURNS", "LIST $"].map(x => h("th", { text: x }))),
-        runs.map(r => h("tr", {}, h("td", { text: ago(r.started) }), h("td", { text: r.ok ? "✓" : "✗" }), h("td", { text: r.duration_s != null ? `${Math.round(r.duration_s / 60)}m` : "-" }),
-          h("td", { text: r.turns ?? "-" }), h("td", { text: r.cost_usd_list_price != null ? r.cost_usd_list_price.toFixed(2) : "-" }))))] : null);
+    $("#quest-kicker").textContent = "QUEST · " + label(d.status);
+    const byId = new Map(["running", "waiting", "queued", "done", "failed"].flatMap(k => App.state.tasks[k]).map(x => [x.id, x]));
+    const kids = (d.children || []).map(id => byId.get(id)).filter(Boolean);
+    fill($("#quest-body"),
+      h("div", { class: "quest-text big", text: d.prompt || d.title }),
+      d.worker ? h("p", { class: "muted", text: `${d.worker.split("@")[0]} · ${d.worker.split("/").pop()} is on it` }) : null,
+      kids.length ? [h("h3", { text: `SUB-AGENTS (${kids.length})` }), h("ul", { class: "subs" }, kids.map(k => h("li", {},
+        h("span", { class: `badge ${k.status}`, text: label(k.status).split(" ")[0] }), h("a", { href: "#", onclick: (e) => { e.preventDefault(); this.openQuest(k); } }, k.title))))] : null,
+      d.result ? [h("h3", { text: "RESULT" }), h("pre", { text: d.result })] : null);
     const acts = [];
-    if (this.questBack) acts.push(h("button", { class: "btn", type: "button", onclick: () => this.openQuests() }, "◀ BACK"));
-    if (["queued", "waiting", "running"].includes(d.status)) acts.push(h("button", { class: "btn danger", type: "button", onclick: async () => { await api(`/api/tasks/${d.id}/cancel`, {}); this.refresh(); this.openQuest(d, this.questBack); } }, "CANCEL QUEST"));
-    if (["failed", "cancelled", "done"].includes(d.status)) acts.push(h("button", { class: "btn primary", type: "button", onclick: async () => { await api(`/api/tasks/${d.id}/retry`, {}); this.refresh(); this.openQuest(d, this.questBack); } }, "↻ RETRY"));
-    fill($("#quest-actions"), ...acts);
+    if (["queued", "waiting", "running"].includes(d.status)) acts.push(h("button", { class: "btn danger", type: "button", onclick: async () => { await api(`/api/tasks/${d.id}/cancel`, {}); this.refresh(); this.openQuest(d); } }, "CANCEL"));
+    if (["failed", "cancelled"].includes(d.status)) acts.push(h("button", { class: "btn primary", type: "button", onclick: async () => { await api(`/api/tasks/${d.id}/retry`, {}); this.refresh(); this.openQuest(d); } }, "↻ TRY AGAIN"));
+    fill($("#quest-actions"), acts);
   },
   openMission() {
     for (const d of $$("dialog[open]")) d.close();
@@ -998,19 +996,13 @@ const UI = {
     $("#mission-form .form-error").textContent = "";
     $("#dlg-mission").showModal(); ta.focus();
   },
-  openJournal() {
-    for (const d of $$("dialog[open]")) d.close();
-    const evs = [...(App.state?.events || [])].reverse();
-    fill($("#journal-list"), ...evs.map(e => h("li", {}, h("time", { text: new Date(e.at * 1000).toTimeString().slice(0, 5) }), h("span", { class: "etype", text: e.type.toUpperCase() }), h("span", { text: e.msg }))));
-    $("#dlg-journal").showModal();
-  },
-
   // ----------------------------------------------------------------- hatching
-  openHatch(agentId) {
+  openHatch(agentId, fromButton) {
     for (const d of $$("dialog[open]")) d.close();
     const st = App.state;
     const primary = st?.agents.find(a => a.primary);
     if (!agentId && primary && !primary.loggedIn) agentId = primary.id; // the farm's own login comes first
+    void fromButton;
     this.hatchFor = agentId || null;
     $("#dlg-hatch").showModal();
     if (agentId) { this.renderHatch({ state: "starting" }); this.beginLogin(agentId); }
@@ -1019,10 +1011,10 @@ const UI = {
   renderHatchName() {
     const form = h("form", {},
       h("canvas", { class: "egg-anim", width: 12, height: 12, id: "egg-cv" }),
-      h("label", {}, "NAME", h("input", { name: "name", maxlength: 24, required: true, placeholder: "e.g. gil or night-shift", autocomplete: "off" })),
+      h("label", {}, "NAME ", h("span", { class: "muted", text: "(optional)" }), h("input", { name: "name", maxlength: 24, placeholder: "e.g. gil or night-shift", autocomplete: "off" })),
       h("p", { class: "muted", text: "A new Claude Code login with its own agents. Log in with another Claude account to add capacity: each account is paced on its own budget. The same account again just shares its budget." }),
       h("p", { class: "form-error", role: "alert" }),
-      h("div", { class: "dlg-actions" }, h("button", { class: "btn primary", type: "submit" }, "▶ HATCH")));
+      h("div", { class: "dlg-actions" }, h("button", { class: "btn primary", type: "submit" }, "▶ ADD CLAUDE")));
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
       const btn = form.querySelector("button"); btn.disabled = true;
@@ -1070,7 +1062,7 @@ const UI = {
     const codeForm = h("form", {},
       h("label", {}, "LOGIN CODE", h("input", { name: "code", autocomplete: "off", spellcheck: "false", required: true, placeholder: "paste the code from the Claude page", disabled: s.state !== "waiting_code" })),
       h("p", { class: "form-error", role: "alert" }),
-      h("div", { class: "dlg-actions" }, h("button", { class: "btn primary", type: "submit", disabled: s.state !== "waiting_code" }, s.state === "checking" ? "HATCHING…" : "▶ HATCH")));
+      h("div", { class: "dlg-actions" }, h("button", { class: "btn primary", type: "submit", disabled: s.state !== "waiting_code" }, s.state === "checking" ? "HATCHING…" : "▶ DONE")));
     codeForm.addEventListener("submit", async (e) => {
       e.preventDefault();
       try { const r = await api(`/api/agents/${this.hatchFor}/code`, { code: new FormData(codeForm).get("code") }); this.renderHatch(r); this.pollHatch(); }
