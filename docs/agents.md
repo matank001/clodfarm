@@ -10,7 +10,10 @@ The guide teaches them to:
 - **Save budget:** a sub-agent without `--on` runs on whichever Claude has room, so a Claude that is running low
   hands big jobs to sub-agents instead of doing them in its conversation.
 - **Start sub-agents you can see:** `clodfarm spawn "<title>" --prompt "<self-contained instructions>" [--on NAME]`,
-  then `clodfarm subagents` / `clodfarm result <id> [--wait]`. Inside a sub-agent, new sub-agents become its
+  then `clodfarm subagents` / `clodfarm result <id> [--wait]`. In a conversation (the Claude app), a Claude waits for
+  them **in the background** (`clodfarm result <id> --wait` with Bash's run_in_background) and ends its turn, so you
+  can keep talking to it while they work; Claude Code wakes it with the result. Ask it to change or stop a running
+  sub-agent and it relays that at once (`clodfarm msg <id>`, `--urgent` to interrupt), as your instruction. Inside a sub-agent, new sub-agents become its
   children; it ends its run and is resumed in the same session with their results. It never sleeps or polls.
 - **Use Claude Code's Agent tool** only for quick look-ups (it isn't visible on the farm or paced).
 - **Work with the other Claudes:** hand off a mission, ask for a review or avoid collisions with a message (see

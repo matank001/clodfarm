@@ -222,3 +222,19 @@ def test_messages_between_claudes(store):
     assert [m["text"] for m in got] == ["can you review the importer?"] and got[0]["from"] == "jestr"
     assert store.inbox("gil") == []  # read now
     assert len(store.inbox("gil", unread_only=False)) == 1
+
+
+def test_cancel_takes_the_whole_tree_and_a_stopped_run_never_reports_done(store):
+    top = store.add_task("top", "x")
+    assert store.claim_next("a@box/w0", 300)["id"] == top["id"]
+    kid = store.add_task("kid", "x", parent=top["id"])
+    grandkid = store.add_task("grandkid", "x", parent=kid["id"])
+    assert store.claim_next("a@box/w1", 300)["id"] == kid["id"]
+    assert store.cancel(top["id"])
+    assert [store.get_task(t["id"])["status"] for t in (top, kid, grandkid)] == ["cancelled"] * 3
+    assert int(store.get_task(top["id"])["children_open"]) == 0 and int(store.get_task(kid["id"])["children_open"]) == 0
+    # the stopped runs report back afterwards: no-ops, nothing is done, no child is counted off twice
+    assert store.finish(kid["id"], "a@box/w1", True, "finished anyway", 5) == "cancelled"
+    assert store.finish(top["id"], "a@box/w0", True, "finished anyway", 5) == "cancelled"
+    assert int(store.get_task(top["id"])["children_open"]) == 0
+    assert not [e for e in store.events() if e["type"] == "task.done"]

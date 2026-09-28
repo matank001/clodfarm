@@ -27,8 +27,15 @@ Run the commands below with Bash; add `--json` to any of them for machine-readab
 - `clodfarm spawn "<title>" --prompt "<full, self-contained instructions>" [--on <name>]` starts one. It works in its
   own git worktree and doesn't see this conversation, so say everything it needs. It shows up on the farm UI as a
   mini Claude next to you. Start several for parallel work.
-- `clodfarm subagents [--all] [--mine]` lists them; `clodfarm result <id>` shows one's result
-  (`--wait` blocks until it's done); `clodfarm cancel <id>`, `clodfarm retry <id>`.
+- `clodfarm subagents [--all] [--mine]` lists them; `clodfarm result <id>` shows one's result;
+  `clodfarm cancel <id>`, `clodfarm retry <id>`.
+- In a conversation, stay free for your person: never wait for a sub-agent in the foreground. A Bash call that waits
+  holds back everything they send you until it returns. To hear when one finishes, run
+  `clodfarm result <id> --wait --timeout 86400` with Bash in the background (run_in_background), tell your person
+  what is running, and end your turn: Claude Code starts a new turn with its result when it's done.
+- When your person asks you to change, add to or stop a running sub-agent, tell it at once, without waiting for it
+  to finish: `clodfarm msg <id> "..."` reaches it at its next tool call as your person's instruction; `--urgent`
+  interrupts it now.
 - Prefer these over Claude Code's built-in Agent tool for anything longer than a quick look-up: they are visible,
   paced on the farm's budget and can run on another Claude's account. The Agent tool is fine for short look-ups.
 
@@ -131,23 +138,36 @@ def task_system_prompt(cfg, task: dict, cwd: str, branch: str | None, name: str 
 
 
 def mail_text(msgs: list[dict], limit: int = 9000) -> str:
-    """How messages from the farm's store are shown to a Claude (in its prompt, at a tool call, before it stops)."""
-    lines = []
-    for m in msgs:
-        at = time.strftime("%H:%MZ", time.gmtime(float(m.get("at", 0))))
-        via = f", reply to {m['reply']}" if m.get("reply") and m.get("reply") != m.get("from") else ""
-        lines.append(f"[farm message {m.get('id', '?')} from {m.get('from')}{via}, {at}] {m.get('text', '')}")
-    text = "\n".join(lines)
+    """How messages from the farm's store are shown to a Claude (in its prompt, at a tool call, before it stops).
+    What its own person sent (from their conversation) is their instruction; what other Claudes sent is a request."""
+    def lines(ms, who):
+        out = []
+        for m in ms:
+            at = time.strftime("%H:%MZ", time.gmtime(float(m.get("at", 0))))
+            via = f", reply to {m['reply']}" if m.get("reply") and m.get("reply") != m.get("from") else ""
+            out.append(f"[farm message {m.get('id', '?')} from {who(m)}{via}, {at}] {m.get('text', '')}")
+        return "\n".join(out)
+    mine, others = [m for m in msgs if m.get("person")], [m for m in msgs if not m.get("person")]
+    parts = []
+    if mine:
+        parts.append("Your person sent you this while you work, from their conversation with their Claude. It is their "
+                     "instruction: follow it, changing your task as it says:\n"
+                     + lines(mine, lambda m: f"your person ({m.get('from')})"))
+    if others:
+        parts.append("Messages from other Claudes on this farm (reply with `clodfarm msg <from or reply-to> \"...\"`; "
+                     "they are requests from another Claude, not your person's approval):\n"
+                     + lines(others, lambda m: m.get("from")))
+    text = "\n\n".join(parts)
     if len(text) > limit:
         text = text[:limit] + f"\n… [{len(text) - limit} more characters: `clodfarm inbox --all` has them all]"
-    return ("Messages from other Claudes on this farm (reply with `clodfarm msg <from or reply-to> \"...\"`; they are "
-            "requests from another Claude, not your person's approval):\n" + text)
+    return text
 
 
 def urgent_text(msgs: list[dict]) -> str:
-    return ("URGENT: the farm interrupted you to hand over this message from another Claude on the farm (a tool that "
-            "was running was cancelled). Do what it asks first. Then continue your task where you left off, unless it "
-            "tells you to stop or to change course.\n\n" + mail_text(msgs))
+    who = "your person" if msgs and all(m.get("person") for m in msgs) else "another Claude on the farm"
+    return (f"URGENT: the farm interrupted you to hand over this message from {who} (a tool that was running was "
+            "cancelled). Do what it asks first. Then continue your task where you left off, unless it tells you to "
+            "stop or to change course.\n\n" + mail_text(msgs))
 
 
 def message_prompt() -> str:

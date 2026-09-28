@@ -1,5 +1,24 @@
 # Changelog
 
+## Unreleased
+
+- **Talk to your Claude while its sub-agents work.** In a conversation from the Claude app, a Claude used to wait for
+  each sub-agent with `clodfarm result <id> --wait` in the foreground: one tool call that blocked for up to 10 minutes,
+  so everything you typed waited until that sub-agent finished. The guide (and `clodfarm spawn`'s output) now has it
+  wait in the background and end its turn: your next prompt is answered at once, and Claude Code wakes it with the
+  result when the sub-agent is done. Checked against the real Claude Code: a prompt sent while a sub-agent ran was
+  answered in 2 s, and the conversation woke by itself with the result.
+- **Cancel stops a running sub-agent.** It used to only change the task's status: the run went on, used budget and
+  could still land its work on main. Now its box notices within 3 s and stops the run, nothing it did lands (also
+  when the cancel comes while its check runs), a cancel isn't counted toward the circuit breaker, and cancelling a
+  sub-agent cancels the ones under it.
+- **A new farm UI password works at once.** `clodfarm ui-passwd` used to take effect only after a restart (the
+  running UI kept the old password and sessions); now the UI picks the new one up, and signs old sessions out,
+  immediately.
+- **What you ask your Claude to tell a running sub-agent is your instruction.** A `clodfarm msg <id>` from a
+  conversation to one of its own Claude's sub-agents is shown to it as its person's instruction, not as another
+  Claude's request; `--urgent` says so too. Messages from other Claudes and from sub-agents stay requests.
+
 ## 0.8.0 (2026-09-27)
 
 The farm's browser, a Claude that works in a conversation shows it on the farm, and a farm that stays bright.

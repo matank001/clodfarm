@@ -31,12 +31,13 @@ from .auth import (accept_remote_control, auth_status, banner, claude_name, inst
 from .config import primary_name_file
 from .config import Config, load
 from .governor import Snapshot, decide
-from .runner import Live, build_cmd, run_agent, session_name
+from .runner import Live, build_cmd, kill_tree, run_agent, session_name
 from .store import Store, iso, now
 
 
 ANSI = re.compile(r"\x1b\[[0-9;?]*[A-Za-z]|\x1b\]8;;[^\x07\x1b]*(?:\x07|\x1b\\)?")
 RC_IDLE = 900  # Remote Control is restarted on a new Claude Code only when no conversation was active for this long
+CANCEL_POLL = 3  # seconds between two looks at a running sub-agent's status: a cancel stops it within about this long
 
 
 class Farm:
@@ -432,7 +433,7 @@ class Farm:
         # a run that starts over (a retry, a lost session) sees them all again
         kind, addr = task.get("kind"), task.get("to") if task.get("kind") == "mail" else tid
         new = store.claim(addr, f"prompt:{tid}")
-        mail = (task.get("mail") or []) + [{k: m.get(k) for k in ("id", "from", "reply", "text", "at", "hops")}
+        mail = (task.get("mail") or []) + [{k: m.get(k) for k in ("id", "from", "reply", "text", "at", "hops", "person")}
                                            for m in new]
         if new:
             store.update_task(tid, mail=mail)
@@ -493,7 +494,23 @@ class Farm:
                 store.renew_slot(slot, holder, cfg.lease_seconds)
                 store.heartbeat(cfg.farm_id, wid, "running", tid, seat=self.seat)
 
+        def watch():
+            """Stop the run as soon as the task isn't this worker's any more: cancelled (from any box, the UI, MCP or
+            a parent's cancel), or handed to another worker."""
+            while not keep.wait(CANCEL_POLL):
+                try:
+                    cur = store.get_task(tid) or {}
+                except Exception:  # noqa: BLE001 - the store is briefly unreachable: look again
+                    continue
+                if cur.get("status") != "running" or cur.get("worker") != holder:
+                    p = self.procs.get(tid)
+                    if p and p.poll() is None:
+                        print(f"{wid}: {tid} is {cur.get('status', 'gone')}: stopping its run", flush=True)
+                        kill_tree(p)
+                    return
+
         threading.Thread(target=renew, daemon=True).start()
+        threading.Thread(target=watch, daemon=True).start()
         before = store.get_snapshot(self.seat)
         on_snap = lambda sn: store.put_snapshot(sn, self.seat)  # noqa: E731
         started = now()
@@ -534,6 +551,12 @@ class Farm:
             # the hook records its conversation; this makes sure the session is registered even without the hook
             store.record_session(res.session_id, claude=task.get("owner") or cfg.name, runs_on=cfg.name,
                                  kind="sub-agent", task=tid, box=cfg.farm_id, cwd=cwd, title=task["title"][:120])
+        if not self.holds(tid, holder):
+            # cancelled while it ran (or handed to another worker): it was stopped, and nothing it did lands; it
+            # doesn't count as a failure either (the circuit breaker is for runs that break)
+            store.event("task.stopped", f"{tid}: its run was stopped ({(store.get_task(tid) or {}).get('status', 'gone')});"
+                        " nothing lands", task=tid)
+            return
 
         if res.rate_limited and not res.ok:
             # not the task's fault: give the attempt back and wait for the window
@@ -558,7 +581,10 @@ class Farm:
 
         text = res.text
         if res.ok and branch:
-            line, outcome = self.land(task, cwd, branch, parent_branch)
+            line, outcome = self.land(task, cwd, branch, parent_branch, holder)
+            if outcome == "stopped":
+                store.event("task.stopped", f"{tid}: cancelled before its work landed; nothing lands", task=tid)
+                return
             if outcome == "verify_failed":
                 fresh = store.get_task(tid) or task
                 if res.session_id and int(fresh.get("verify_fixes_used", 0)) < cfg.verify_fixes and \
@@ -601,9 +627,14 @@ class Farm:
             todo += (self.store.get_task(c) or {}).get("children") or []
         return out
 
-    def land(self, task: dict, cwd: str, branch: str, parent_branch: str | None) -> tuple[str, str]:
+    def holds(self, tid: str, holder: str) -> bool:
+        cur = self.store.get_task(tid) or {}
+        return cur.get("status") == "running" and cur.get("worker") == holder
+
+    def land(self, task: dict, cwd: str, branch: str, parent_branch: str | None, holder: str = "") -> tuple[str, str]:
         """Put a successful run's commits where they belong. Returns (a line for the task result, outcome):
-        outcome is kept (stays on its branch), landed (on main), conflict or verify_failed."""
+        outcome is kept (stays on its branch), landed (on main), conflict, verify_failed or stopped (cancelled
+        meanwhile: not merged)."""
         cfg, store, tid = self.cfg, self.store, task["id"]
         cur = store.get_task(tid) or {}
         more_to_do = int(cur.get("children_open", 0)) > 0 or (
@@ -626,6 +657,8 @@ class Farm:
                 store.event("verify.passed" if passed else "verify.failed", f"{tid}: `{cfg.verify_cmd}`", task=tid)
                 if not passed:
                     return output, "verify_failed"
+            if holder and not self.holds(tid, holder):  # cancelled while the check ran
+                return f"cancelled before landing: {branch} not merged", "stopped"
             out = gitops.merge(cfg.repo_dir, cwd, branch, push=cfg.push)
             for d in self.descendants(task):  # their work is in main now, via this task
                 gitops.remove_worktree(cfg.repo_dir, os.path.join(os.path.dirname(cfg.repo_dir), ".worktrees", d),

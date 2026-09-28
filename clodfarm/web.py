@@ -60,6 +60,21 @@ class Auth:
         self._lock = threading.Lock()
         self.generated: str | None = None
         self.data = self._load()
+        self._seen = self._mtime()
+
+    def _mtime(self) -> int:
+        try:
+            return os.stat(self.path).st_mtime_ns
+        except OSError:
+            return 0
+
+    def _fresh(self):
+        """`clodfarm ui-passwd` rewrites the file from another process: use the new password (and its new secret,
+        which signs every old session out) as soon as it's there."""
+        m = self._mtime()
+        if m and m != self._seen:
+            self._seen = m
+            self.data = self._load()
 
     def _load(self) -> dict:
         try:
@@ -93,6 +108,7 @@ class Auth:
         with os.fdopen(fd, "w") as f:
             json.dump(d, f)
         os.replace(tmp, self.path)
+        self._seen = self._mtime()
 
     def set_password(self, password: str):
         if len(password) < 8:
@@ -101,6 +117,7 @@ class Auth:
         self._save(self.data)
 
     def check(self, password: str, ip: str) -> bool:
+        self._fresh()
         with self._lock:
             recent = [t for t in self.fails.get(ip, []) if t > time.time() - 300]
             self.fails[ip] = recent
@@ -126,6 +143,7 @@ class Auth:
     def verify(self, token: str | None) -> str | None:
         if not token or "." not in token:
             return None
+        self._fresh()
         b, sig = token.rsplit(".", 1)
         try:
             payload = base64.urlsafe_b64decode(b + "=" * (-len(b) % 4)).decode()

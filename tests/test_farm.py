@@ -79,6 +79,38 @@ def test_parent_spawns_sub_agents_and_everything_merges(env):
         stop_farm(farm, t)
 
 
+def test_cancelling_a_running_sub_agent_stops_it_at_once(env):
+    farm, t = start_farm()
+    try:
+        tid = json.loads(cli("spawn", "long", "--prompt", "SLOW 60 COMMIT late", "--json").stdout)["id"]
+        proc = wait_for(lambda: farm.procs.get(tid))
+        t0 = time.time()
+        assert cli("cancel", tid).returncode == 0
+        wait_for(lambda: proc.poll() is not None, timeout=20)
+        assert time.time() - t0 < 15, "stopped within seconds, not when its 60 s are up"
+        wait_for(lambda: [e for e in farm.store.events(time.time() - 60) if e["type"] == "task.stopped"])
+        assert farm.store.get_task(tid)["status"] == "cancelled"
+        assert "late.txt" not in repo_files(env)
+        assert int((farm.store.b.get("CONTROL", "HEALTH") or {}).get("failures", 0)) == 0, "a cancel is not a failure"
+    finally:
+        stop_farm(farm, t)
+
+
+def test_a_sub_agent_cancelled_while_its_check_runs_never_lands(env, monkeypatch):
+    monkeypatch.setenv("FARM_VERIFY_CMD", "sleep 6")
+    farm, t = start_farm()
+    try:
+        tid = json.loads(cli("spawn", "quick", "--prompt", "COMMIT quick", "--json").stdout)["id"]
+        wait_for(lambda: [c for c in calls(env) if c.get("task") == tid])  # its run is over: the check runs now
+        wait_for(lambda: tid not in farm.procs and farm.store.get_task(tid)["status"] == "running")
+        assert cli("cancel", tid).returncode == 0
+        wait_for(lambda: [e for e in farm.store.events(time.time() - 60) if e["type"] == "task.stopped"], timeout=30)
+        assert "quick.txt" not in repo_files(env), "cancelled before it landed: main is untouched"
+        assert farm.store.get_task(tid)["status"] == "cancelled"
+    finally:
+        stop_farm(farm, t)
+
+
 def test_remote_control_is_kept_running(env):
     farm, t = start_farm()
     try:

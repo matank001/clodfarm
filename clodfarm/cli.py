@@ -270,7 +270,9 @@ def cmd_spawn(cfg, a):
         print(str(e), file=sys.stderr)
         return 2
     _out(t, a.json, f"started sub-agent {t['id']}: {t['title']}" + (f" on {t['to']}" if t.get("to") else "")
-         + (f" (child of {parent})" if parent else "") + f". Its result: clodfarm result {t['id']}")
+         + (f" (child of {parent})" if parent else "") + f". Its result: clodfarm result {t['id']}"
+         + ("" if me else f". To hear when it's done without keeping your person waiting, run `clodfarm result "
+                          f"{t['id']} --wait --timeout 86400` with Bash in the background and end your turn"))
     return 0
 
 
@@ -346,10 +348,13 @@ def cmd_msg(cfg, a):
     if not text.strip():
         print("the message is empty", file=sys.stderr)
         return 2
-    me = _my_address(cfg)
-    m = store.send_message(os.environ.get("FARM_OWNER") or cfg.name, a.to, text.strip(),
+    me, frm = _my_address(cfg), os.environ.get("FARM_OWNER") or cfg.name
+    # from a conversation (not a sub-agent) to one of its own Claude's sub-agents: the person's own instruction
+    person = bool(task) and me == cfg.name and task.get("owner") == frm
+    m = store.send_message(frm, a.to, text.strip(),
                            reply=me if me != cfg.name else None, urgent=a.urgent, wake=a.wake,
-                           hops=int(os.environ.get("FARM_MAIL_HOPS") or 0), wake_after=cfg.mail_wake_after)
+                           hops=int(os.environ.get("FARM_MAIL_HOPS") or 0), wake_after=cfg.mail_wake_after,
+                           person=person)
     wake = f"; if nobody has read it in {cfg.mail_wake_after}s, the farm starts someone to handle it" if a.wake else ""
     status = (task or {}).get("status")
     if not task:

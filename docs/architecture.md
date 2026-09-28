@@ -69,6 +69,7 @@ stateDiagram-v2
   running --> failed: failure, no attempts left
   queued --> cancelled
   waiting --> cancelled
+  running --> cancelled: its run is stopped within seconds, nothing lands
   failed --> queued: retry
 ```
 
@@ -108,6 +109,7 @@ on first start, so that only happens if you remove it.
 | Remote Control exits | Restarted after 10 s, with exponential back-off up to 30 min if it keeps failing fast. |
 | Usage limit | See [budget.md](budget.md): the attempt is handed back and the whole account pauses until the reset. |
 | Logged out (token revoked) | Runs fail with auth errors. `clodfarm doctor` shows it. Log in again with `clodfarm login`. |
+| A sub-agent is cancelled while it runs | Its box checks every running sub-agent's status every 3 s and stops the run (SIGTERM to its process group, SIGKILL after 5 s). Nothing it did lands, even when the cancel comes while its check runs; it isn't counted as a failure. Cancelling a sub-agent cancels the ones under it too. |
 
 ## Scaling out
 

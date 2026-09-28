@@ -227,10 +227,12 @@ class Store:
             return "waiting"
         task = self.get_task(tid) or {}
         if task.get("pending_review") and int(task.get("resumes", 0)) < max_resumes:
-            self._set_status(tid, "queued", when=mine, extra={**fields, "resume": True}, remove=drop)
+            if not self._set_status(tid, "queued", when=mine, extra={**fields, "resume": True}, remove=drop):
+                return task.get("status", "unknown")  # not ours any more (cancelled, reaped): no-op
             self.event("task.resume", f"{tid}: sub-agents finished during the run; resuming", task=tid)
             return "queued"
-        self._set_status(tid, "done", when=mine, extra=fields, remove=drop)
+        if not self._set_status(tid, "done", when=mine, extra=fields, remove=drop):
+            return task.get("status", "unknown")
         self.event("task.done", f"{tid} {task.get('title', '')[:120]}", task=tid)
         self._child_finished(tid)
         return "done"
@@ -269,11 +271,15 @@ class Store:
         self._update(*self._tkey(tid), fn)
 
     def cancel(self, tid: str) -> bool:
+        """Cancel a sub-agent and every sub-agent under it. A running one is stopped by its box within seconds
+        (Farm.run_task watches its status) and nothing it did lands."""
         ok = self._set_status(tid, "cancelled", when=lambda x: x.get("status") in ("queued", "waiting", "running"),
                               remove=("lease_until",))
         if ok:
             self.event("task.cancelled", tid, task=tid)
             self._child_finished(tid)
+            for child in (self.get_task(tid) or {}).get("children") or []:
+                self.cancel(child)
         return ok
 
     def retry(self, tid: str) -> bool:
@@ -322,12 +328,13 @@ class Store:
 
     # -------------------------------------------------------------- messages
     def send_message(self, frm: str, to: str, text: str, reply: str | None = None, urgent: bool = False,
-                     wake: bool = False, hops: int = 0, wake_after: float = 120) -> dict:
+                     wake: bool = False, hops: int = 0, wake_after: float = 120, person: bool = False) -> dict:
         """Leave a message for ``to``: a Claude (its name; its conversations read it) or one sub-agent (its task id).
         ``reply`` is where an answer goes (the sender's task id inside a sub-agent). ``urgent`` interrupts a running
         sub-agent. ``wake`` makes sure someone handles it: if it is still unread after ``wake_after`` seconds, the
         farm starts a sub-agent for that Claude, or resumes that finished sub-agent (see ``dispatch_wakes``).
-        ``hops`` counts how many message-triggered runs led to this one."""
+        ``hops`` counts how many message-triggered runs led to this one. ``person``: it comes from the person the
+        recipient sub-agent works for (their own conversation), so it is their instruction, not another Claude's."""
         t = now()
         item = {"PK": f"MSG#{to}", "SK": f"{t:017.6f}#{secrets.token_hex(2)}", "ver": 1, "id": new_id(), "from": frm,
                 "to": to, "reply": reply or frm, "text": text[:4000], "at": t, "read": False, "hops": int(hops),
@@ -336,6 +343,8 @@ class Store:
             item["urgent"] = True
         if wake:
             item["wake"] = True
+        if person:
+            item["person"] = True
         self.b.put(item)
         self.ring(to)
         if wake:

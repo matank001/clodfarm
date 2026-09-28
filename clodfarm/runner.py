@@ -123,7 +123,7 @@ def run_agent(cmd: list[str], prompt: str, cwd: str, env: dict, timeout: int,
         live.proc = proc
     if on_start:
         on_start(proc)
-    killer = threading.Timer(timeout, lambda: _kill(proc))
+    killer = threading.Timer(timeout, lambda: kill_tree(proc))
     killer.start()
     stderr_tail: list[str] = []
 
@@ -206,7 +206,9 @@ def run_agent(cmd: list[str], prompt: str, cwd: str, env: dict, timeout: int,
     return res
 
 
-def _kill(proc: subprocess.Popen):
+def kill_tree(proc: subprocess.Popen):
+    """Stop a run and everything it started (it leads its own process group): SIGTERM, then SIGKILL after 5 s.
+    On SIGTERM Claude Code stops the running command's process tree and runs its SessionEnd hooks."""
     try:
         os.killpg(proc.pid, 15)
         time.sleep(5)

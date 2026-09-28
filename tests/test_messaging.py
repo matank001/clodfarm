@@ -93,6 +93,34 @@ def test_a_wake_message_resumes_a_finished_sub_agent(store):
     assert t["status"] == "queued" and t["resume_reason"] == "message" and t["message_resumes"] == 1
 
 
+def test_what_your_own_conversation_sends_is_your_instruction(env, store):
+    from clodfarm.prompts import mail_text, urgent_text
+    mine = store.add_task("importer", "x", owner="test")["id"]
+    theirs = store.add_task("gil's job", "x", owner="gil")["id"]
+    cli("msg", mine, "use the blue palette")  # from test's conversation (not a sub-agent)
+    cli("msg", theirs, "can you use blue too?")
+    cli("msg", mine, "from a sibling", extra_env={"FARM_TASK_ID": theirs, "FARM_OWNER": "test"})
+    got = {m["text"]: m for m in store.unread(mine) + store.unread(theirs)}
+    assert got["use the blue palette"].get("person") is True
+    assert not got["can you use blue too?"].get("person"), "another Claude's sub-agent: a request, not an order"
+    assert not got["from a sibling"].get("person"), "a sub-agent speaks for itself, not for the person"
+    text = mail_text(store.unread(mine))
+    assert "Your person sent you this" in text and "your person (test)" in text and "use the blue palette" in text
+    assert "not your person's approval" in text and "from a sibling" in text  # both kinds, each framed as what it is
+    assert "from your person" in urgent_text([got["use the blue palette"]])
+    assert "from another Claude" in urgent_text([got["can you use blue too?"]])
+
+
+def test_a_conversation_is_told_to_wait_for_sub_agents_in_the_background(env, store):
+    from clodfarm.prompts import FARM_GUIDE
+    assert "never wait for a sub-agent in the foreground" in FARM_GUIDE and "run_in_background" in FARM_GUIDE
+    out = cli("spawn", "draw", "--prompt", "x").stdout
+    assert "--wait --timeout 86400` with Bash in the background and end your turn" in out
+    parent = store.add_task("parent", "x")["id"]
+    inside = cli("spawn", "part", "--prompt", "x", "--detach", extra_env={"FARM_TASK_ID": parent}).stdout
+    assert "in the background" not in inside, "a sub-agent ends its run instead (it is resumed with the results)"
+
+
 # ------------------------------------------------------------------ the hooks
 def test_the_farm_installs_its_hooks_and_takes_messages(env):
     home = env / "claude-home"
@@ -209,6 +237,7 @@ def test_a_running_sub_agent_gets_a_message_at_its_next_tool_call(env):
         wait_for(lambda: farm.store.get_task(tid)["status"] == "done", timeout=40)
         result = farm.store.get_task(tid)["result"]
         assert "mail: tool:" in result and "use tenant_id" in result, result
+        assert "Your person sent you this" in result, "from its own Claude's conversation: the person's instruction"
         run = [c for c in calls(env) if c.get("task") == tid][0]
         assert run["live"] and "tenant_id" not in run["prompt"], "it came mid-run, not with the prompt"
     finally:

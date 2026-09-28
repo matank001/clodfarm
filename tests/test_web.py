@@ -258,3 +258,32 @@ def test_slack_setup_endpoints(ui):
     assert code == 400 and "xoxb-" in body["error"]
     code, body, _ = call(base + "/api/state")
     assert body["slack"]["state"] == "off"
+
+
+def test_a_new_password_works_at_once_and_signs_old_sessions_out(env, backend, monkeypatch):
+    if backend != "sqlite":
+        pytest.skip("the UI reads the same Store API on both backends; one is enough")
+    import subprocess
+    import sys
+    from http.server import ThreadingHTTPServer
+    monkeypatch.delenv("FARM_UI_PASSWORD", raising=False)
+    cfg = load()
+    store = Store.from_config(cfg)
+    store.ensure_table()
+    farm_ui = FarmUI(cfg, store)
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), make_handler(farm_ui))
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    base = f"http://127.0.0.1:{srv.server_address[1]}"
+    try:
+        old = client()
+        assert old(base + "/api/login", {"password": farm_ui.auth.generated})[0] == 200
+        assert old(base + "/api/state")[0] == 200
+        subprocess.run([sys.executable, "-m", "clodfarm", "ui-passwd"], input="brand new pass\n", text=True,
+                       capture_output=True, check=True)  # from another process, like `docker exec`
+        assert old(base + "/api/state")[0] == 401, "every open session is signed out"
+        new = client()
+        assert new(base + "/api/login", {"password": farm_ui.auth.generated or ""})[0] == 401
+        assert new(base + "/api/login", {"password": "brand new pass"})[0] == 200, "no restart needed"
+    finally:
+        srv.shutdown()
+        farm_ui.manager.shutdown()
