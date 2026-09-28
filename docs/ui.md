@@ -29,15 +29,34 @@ sub-agents. Under **TOOLS** is what that Claude can use, as Claude Code reported
 version, its MCP servers (connected, needs sign-in or failed), built-in and MCP tools, skills, plugins and sub-agent
 types.
 
-The toolbar, bottom right:
+The toolbar, bottom right (hover a button, or tab to it, for its name and key):
 
 | Button | Key | What it does |
 |---|---|---|
 | Chat bubble | `T` | How to talk to your Claude: the steps in the Claude app, example asks, and the MCP command for Claude Code on your computer. With no Claude logged in yet, it says to log one in first. |
 | Slack logo | `S` | Give the farm work from Slack ([slack.md](slack.md)). Its dot is green when connected. |
 | Chart | `D` | The dashboards ([dashboards.md](dashboards.md)). |
+| Clipboard | `J` | The TASKS page (below): every sub-agent and schedule, and what you can do to them. |
 | Globe | `B` | The farm's browser: log in to sites there and the Claudes use those logins ([browser.md](browser.md)). |
-| **+ NEW CLAUDE** | `C` | Add a Claude login. |
+| **+ NEW CLAUDE** | `C` | Add a Claude login, or a [bot](bots.md). |
+
+## The TASKS page
+
+`/tasks` lists everything the farm is doing and will do, and refreshes every few seconds:
+
+- **At work and waiting:** every running, waiting (for its own sub-agents) and queued sub-agent: whose it is, which
+  Claude runs it (or which one it waits for), and since when. Click a title for its instructions, its result so far
+  and its runs. **CANCEL** stops it and the sub-agents under it; nothing it did lands.
+- **Schedules:** what each one does, when it runs next (in your time) and how often it ran. **RUN NOW** starts its
+  sub-agent once and keeps its next time; **PAUSE** stops it firing and **RESUME** starts it again from its next
+  time (not the runs it missed); **REMOVE** deletes it. **+ SCHEDULE** adds one: a cron line, an interval or one time,
+  in your time zone, on any Claude or on the one you pick.
+- **Finished in the last day**, with **RETRY** for any of them.
+- **PAUSE THE FARM** at the top stops new sub-agents on every Claude (running ones finish) until you resume.
+  A filter shows one Claude's work only.
+
+Cancel and remove ask once more on the button (SURE?). The same things from a shell: `clodfarm subagents`,
+`clodfarm cancel|retry ID`, `clodfarm schedule list|pause|resume|run|remove ID`.
 
 When you **release** a Claude, it leaves with everything it was running: its `clodfarm run` stops, its sub-agents go
 back to wait for another Claude with budget, and it no longer shows on the farm.

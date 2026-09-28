@@ -508,6 +508,37 @@ class Store:
     def schedules(self) -> list[dict]:
         return sorted(self.b.query("SCHEDULE"), key=lambda x: float(x.get("next_at", 0)))
 
+    def pause_schedule(self, sid: str, paused: bool, by: str | None = None) -> dict | None:
+        """Stop a schedule from firing, or let it fire again. A resumed one runs next at its next time from now, not
+        at the times it missed (a one-off whose time went by while it was paused runs now)."""
+        def fn(x):
+            if bool(x.get("paused")) == paused:
+                return None
+            if paused:
+                x["paused"] = True
+            else:
+                x.pop("paused", None)
+                nxt = next_run({**x, "next_at": None} if x.get("every") else x, now())
+                x["next_at"] = nxt if nxt is not None else now()
+            return x
+        it = self._update("SCHEDULE", sid, fn)
+        if it:
+            self.event("schedule.paused" if paused else "schedule.resumed", f"{sid} {it.get('title', '')[:120]}", by=by)
+        return it
+
+    def run_schedule(self, sid: str, max_depth: int = 3, max_attempts: int = 3, by: str | None = None) -> dict | None:
+        """Start a schedule's sub-agent now, once, by hand; its next time stays as it was."""
+        def fn(x):
+            x.update(runs=int(x.get("runs", 0)) + 1, last_at=now())
+            return x
+        it = self._update("SCHEDULE", sid, fn)
+        if not it:
+            return None
+        self.event("schedule.run", f"{sid} {it.get('title', '')[:120]}: started by hand", by=by)
+        return self.add_task(it["title"], it["prompt"], priority=int(it.get("priority", 5)),
+                             created_by=f"schedule:{it['id']}", max_depth=max_depth, max_attempts=max_attempts,
+                             to=it.get("to"), owner=it.get("owner"))
+
     def remove_schedule(self, sid: str) -> bool:
         it = self.b.get("SCHEDULE", sid)
         if not it:
@@ -520,7 +551,7 @@ class Store:
         """Queue every schedule that is due. Safe on every box at once: each firing is claimed atomically."""
         out, t = [], now()
         for sch in self.b.query("SCHEDULE"):
-            if float(sch.get("next_at", 0)) > t:
+            if sch.get("paused") or float(sch.get("next_at", 0)) > t:
                 continue
             due = float(sch["next_at"])
 

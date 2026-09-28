@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="color-scheme" content="light">
+<meta name="theme-color" content="#4f6b25">
+<meta name="robots" content="noindex, nofollow">
+<title>Tasks · clodfarm</title>
+<link rel="icon" href="{{BASE}}/favicon.svg" type="image/svg+xml">
+<link rel="preload" href="{{BASE}}/fonts/PressStart2P.ttf" as="font" type="font/ttf" crossorigin>
+<link rel="stylesheet" href="{{BASE}}/dash.css">
+<link rel="stylesheet" href="{{BASE}}/tasks.css">
+<script src="{{BASE}}/tasks.js" defer></script>
+</head>
+<body data-base="{{BASE}}">
+<header class="top">
+  <nav class="crumbs" aria-label="Breadcrumb">
+    <a class="logo" href="{{BASE}}/" title="Back to the farm"><img src="{{BASE}}/logo.svg" alt="" width="28" height="32"><span>CLOD</span><span>FARM</span></a>
+    <span class="sep" aria-hidden="true">/</span>
+    <span id="crumb-here" aria-current="page">Tasks</span>
+  </nav>
+  <div class="top-actions">
+    <span class="chip off" id="state"><span class="dot" aria-hidden="true"></span><span id="state-text">…</span></span>
+    <button type="button" class="btn small-btn" id="pause" hidden title="No new sub-agents start on any Claude until you resume (running ones finish)">❚❚ PAUSE THE FARM</button>
+    <button type="button" class="btn small-btn primary" id="resume" hidden title="Sub-agents start again">▶ RESUME</button>
+  </div>
+</header>
+<main class="wrap wide" aria-live="polite">
+  <p class="form-error bar-error" id="error" role="alert"></p>
+  <p class="paused-note" id="paused-note" hidden></p>
+
+  <section class="card panel" aria-labelledby="active-h">
+    <div class="panel-head">
+      <h2 id="active-h">AT WORK AND WAITING</h2>
+      <div class="filters" role="group" aria-label="Show">
+        <label class="sr" for="who">Which Claude</label>
+        <select id="who"><option value="">EVERY CLAUDE</option></select>
+      </div>
+    </div>
+    <div class="table-wrap"><table class="tasks">
+      <thead><tr><th>STATUS</th><th>SUB-AGENT</th><th>FOR</th><th>ON</th><th>SINCE</th><th class="acts"><span class="sr">Actions</span></th></tr></thead>
+      <tbody id="active"></tbody>
+    </table></div>
+    <p class="muted empty-row" id="active-empty" hidden>No sub-agent is at work or waiting.</p>
+  </section>
+
+  <section class="card panel" aria-labelledby="sched-h">
+    <div class="panel-head">
+      <h2 id="sched-h">SCHEDULES</h2>
+      <button type="button" class="btn small-btn primary" id="add-open">+ SCHEDULE</button>
+    </div>
+    <form class="sched-form" id="add-form" autocomplete="off" hidden>
+      <label>TITLE <input name="title" maxlength="200" required placeholder="morning report"></label>
+      <label class="wide">INSTRUCTIONS <span class="muted">(what the sub-agent is told each time; self-contained)</span>
+        <textarea name="prompt" rows="4" placeholder="Check yesterday's signups and post a summary to the dashboard."></textarea></label>
+      <fieldset class="when">
+        <legend>WHEN</legend>
+        <div class="seg-group" role="radiogroup" aria-label="How it repeats">
+          <label><input type="radio" name="kind" value="cron" checked> CRON</label>
+          <label><input type="radio" name="kind" value="every"> EVERY</label>
+          <label><input type="radio" name="kind" value="at"> ONCE AT</label>
+        </div>
+        <input name="when" required>
+        <span class="muted small" id="when-hint"></span>
+      </fieldset>
+      <label>TIME ZONE <input name="tz" maxlength="64" spellcheck="false"></label>
+      <label>ON <select name="on"><option value="">any Claude with budget</option></select></label>
+      <p class="form-error" id="add-error" role="alert"></p>
+      <div class="form-actions">
+        <button type="submit" class="btn small-btn primary">ADD SCHEDULE</button>
+        <button type="button" class="btn small-btn" id="add-cancel">CANCEL</button>
+      </div>
+    </form>
+    <div class="table-wrap"><table class="tasks">
+      <thead><tr><th>STATE</th><th>SCHEDULE</th><th>WHEN · NEXT</th><th>ON</th><th class="acts"><span class="sr">Actions</span></th></tr></thead>
+      <tbody id="schedules"></tbody>
+    </table></div>
+    <p class="muted empty-row" id="sched-empty" hidden>No schedules. Add one here, or ask a Claude: “every weekday at 9, check …”.</p>
+  </section>
+
+  <section class="card panel" aria-labelledby="done-h">
+    <div class="panel-head"><h2 id="done-h">FINISHED IN THE LAST DAY</h2></div>
+    <div class="table-wrap"><table class="tasks">
+      <thead><tr><th>STATUS</th><th>SUB-AGENT</th><th>FOR</th><th>RAN ON</th><th>ENDED</th><th class="acts"><span class="sr">Actions</span></th></tr></thead>
+      <tbody id="finished"></tbody>
+    </table></div>
+    <p class="muted empty-row" id="done-empty" hidden>Nothing finished in the last day.</p>
+  </section>
+</main>
+</body>
+</html>

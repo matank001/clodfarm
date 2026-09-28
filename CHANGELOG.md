@@ -1,5 +1,20 @@
 # Changelog
 
+## Unreleased
+
+- **A TASKS page: every sub-agent and schedule, and what you can do to them.** The new clipboard button on the farm
+  (or J) opens `/tasks`:
+  - **At work and waiting:** every running, waiting and queued sub-agent, whose it is and which Claude runs it.
+    Open one to see its instructions and its result so far; CANCEL stops it (it asks first).
+  - **Schedules:** when each one runs next, in your time; RUN NOW, PAUSE, RESUME and REMOVE; + SCHEDULE adds one
+    (cron, every or once at, in your time zone, on any Claude).
+  - **Finished in the last day**, with RETRY; a filter by Claude; and PAUSE THE FARM / RESUME at the top.
+  - **From a shell:** `clodfarm schedule pause|resume|run ID` too. A paused schedule doesn't fire; resumed, it runs
+    at its next time from now, not the ones it missed.
+- **The toolbar says what each button is.** Hovering (or tabbing to) a button shows its name on a little wooden sign,
+  with its shortcut key: TALK TO YOUR CLAUDE · T, CONNECT SLACK · S, DASHBOARDS AND STATS · D, TASKS AND
+  SCHEDULES · J, THE FARM'S BROWSER · B, ADD A CLAUDE OR A BOT · C.
+
 ## 0.9.0 (2026-09-28)
 
 Bots on other models, a proxy for the farm's browser, a Claude you can talk to while its sub-agents work, and a

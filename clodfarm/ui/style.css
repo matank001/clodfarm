@@ -146,6 +146,19 @@ output { color: var(--clay-2); }
   border: 5px solid var(--tan-4); border-radius: 10px; box-shadow: 0 0 0 4px var(--tan), 0 6px 0 4px var(--shadow); }
 .tool.mini img { width: 32px; height: 32px; }
 .tool.mini img[src$=".svg"] { image-rendering: auto; width: 30px; height: 30px; }
+/* what a toolbar button is, on a little wooden sign above it (hover or keyboard focus), with its shortcut key */
+.tool[data-tip] { position: relative; }
+.tool[data-tip]::before {
+  content: attr(data-tip) " · " attr(data-key); position: absolute; bottom: calc(100% + 14px); left: 50%; z-index: 30;
+  transform: translate(-50%, 4px); opacity: 0; pointer-events: none; white-space: nowrap;
+  font: 8px/1 var(--font-px); letter-spacing: .3px; color: #fff; text-transform: uppercase; padding: 8px 10px;
+  background: #4a3b2c; border: 3px solid #2f251b; border-radius: 4px; box-shadow: 0 3px 0 rgba(0, 0, 0, .35);
+  transition: opacity .12s, transform .12s;
+}
+.tool[data-tip]:hover::before, .tool[data-tip]:focus-visible::before { opacity: 1; transform: translate(-50%, 0); }
+.tool.wide-tool[data-tip]::before { left: auto; right: 0; transform: translate(0, 4px); }  /* the last one: keep it on screen */
+.tool.wide-tool[data-tip]:hover::before, .tool.wide-tool[data-tip]:focus-visible::before { transform: none; }
+@media (hover: none) { .tool[data-tip]::before { display: none; } }
 .job-text { display: block; font: 22px/1.2 var(--font-body); color: var(--ink); white-space: pre-wrap; word-break: break-word; }
 .job-text.big { font-size: 24px; background: #fff; border: 3px solid var(--paper-2); border-radius: 4px; padding: 12px; max-height: 320px; overflow: auto; }
 .subs { list-style: none; padding: 0; margin: 0; }
@@ -287,5 +300,6 @@ pre, .pre {
 }
 @media (prefers-reduced-motion: reduce) {
   .blink, .textbox .more { animation: none; }
+  .tool[data-tip]::before { transition: none; }
   dialog[open] { animation: none; }
 }

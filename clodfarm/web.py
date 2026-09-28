@@ -254,6 +254,32 @@ class FarmUI:
                        for e in events[-40:]],
         }
 
+    FINISHED_FOR = 86400  # the TASKS page lists sub-agents that finished in the last day
+
+    def tasks_view(self) -> dict:
+        """Everything the TASKS page shows: every sub-agent at work or waiting, the ones that finished in the last
+        day, every schedule, and whether the farm is paused."""
+        from .schedule import describe
+        store, t0 = self.store, now()
+
+        def view(t):
+            v = _public_task(t)
+            v["on"] = t.get("worker", "").split("@")[0] if t.get("status") == "running" else t.get("to")
+            v["owner"] = t.get("owner") or self.cfg.name
+            return v
+        active = [view(t) for s in ("running", "waiting", "queued") for t in store.list_tasks(s, 200)]
+        finished = sorted((view(t) for s in ("done", "failed", "cancelled") for t in store.list_tasks(s, 60)
+                           if t0 - float(t.get("finished") or t.get("updated") or 0) < self.FINISHED_FOR),
+                          key=lambda v: -float(v.get("finished") or v.get("updated") or 0))[:60]
+        schedules = [{**{k: v for k, v in r.items() if k not in ("PK", "SK", "ver")}, "when": describe(r)}
+                     for r in store.schedules()]
+        claudes = sorted({a["id"] for a in self.manager.all()} | {w["SK"].split("/")[0].split("@")[0]
+                                                                  for w in store.workers()})
+        ctl = store.control()
+        return {"now": t0, "farm": self.cfg.farm, "me": self.cfg.name, "paused": bool(ctl.get("paused")),
+                "pause_reason": ctl.get("reason") or "", "active": active, "finished": finished,
+                "schedules": schedules, "claudes": claudes, "tz": os.environ.get("FARM_TZ") or "UTC"}
+
     TURN_QUIET = 600  # a turn whose transcript is silent this long was interrupted (no Stop comes then)
 
     def _talking(self, store) -> dict[str, dict]:
@@ -613,6 +639,8 @@ def make_handler(ui: FarmUI):
                     return self._page("dash.html")  # the list and each dashboard: one page, routed by dash.js
                 if path in ("/browser", "/browser/"):
                     return self._page("browser.html", self._browser_csp())
+                if path in ("/tasks", "/tasks/"):
+                    return self._page("tasks.html")
                 if path.startswith("/browser/novnc/"):  # noVNC, the VNC client the browser page draws with
                     return self._static(path[len("/browser/novnc/"):], browser.novnc_dir())
                 if path == "/api/browser/screen":
@@ -630,6 +658,18 @@ def make_handler(ui: FarmUI):
                     return self._json(ui.slack.view())
                 if path == "/api/browser":
                     return self._json(ui.browsers.status())
+                if path == "/api/tasks":
+                    return self._json(ui.tasks_view())
+                m = re.fullmatch(r"/api/tasks/([a-z0-9]{6,40})", path)
+                if m:  # one sub-agent: its instructions, its result so far and its runs
+                    t = ui.store.get_task(m.group(1))
+                    if not t:
+                        return self._err(404, "no such sub-agent")
+                    runs = [{k: r.get(k) for k in ("worker", "started", "duration_s", "ok", "turns", "terminal_reason")}
+                            for r in ui.store.runs(t["id"])]
+                    return self._json({**_public_task(t, full=True), "runs": runs[-10:],
+                                       "on": t.get("worker", "").split("@")[0] if t.get("status") == "running"
+                                       else t.get("to")})
                 m = re.fullmatch(r"/api/agents/([a-z0-9@._-]+)/tools", path)
                 if m:  # what that Claude can use, as its last run saw it
                     t = ui.store.tools().get(m.group(1))
@@ -763,6 +803,46 @@ def make_handler(ui: FarmUI):
                 ui.manager.share_browser_tools()
                 threading.Thread(target=ui.browsers.sync, name="browser-sync", daemon=True).start()
                 return self._json(ui.browsers.status())
+            m = re.fullmatch(r"/api/tasks/([a-z0-9]{6,40})/(cancel|retry)", path)
+            if m:
+                tid, action = m.groups()
+                if not store.get_task(tid):
+                    return self._err(404, "no such sub-agent")
+                ok = store.cancel(tid) if action == "cancel" else store.retry(tid)
+                if not ok:
+                    raise ValueError("it already finished" if action == "cancel" else "it is still at work")
+                return self._json(ui.tasks_view())
+            if path == "/api/schedules":  # a new schedule from the TASKS page
+                from .schedule import parse_at, parse_every
+                title, prompt = str(data.get("title") or "").strip()[:200], str(data.get("prompt") or "").strip()
+                whens = [k for k in ("cron", "every", "at") if str(data.get(k) or "").strip()]
+                if not title:
+                    raise ValueError("give it a title")
+                if len(whens) != 1:
+                    raise ValueError("give exactly one of cron, every or at")
+                tz = str(data.get("tz") or os.environ.get("FARM_TZ") or "UTC").strip()[:64]
+                on = str(data.get("on") or "").strip()[:64] or None
+                w = str(data[whens[0]]).strip()
+                try:
+                    spec = {"cron": w[:100]} if whens == ["cron"] else {"every": parse_every(w[:20])} \
+                        if whens == ["every"] else {"at": parse_at(w[:40], tz)}
+                    store.add_schedule(title, prompt[:100_000] or title, tz=tz, to=on, created_by="ui",
+                                       owner=on or ui.cfg.name, **spec)
+                except (ValueError, KeyError) as e:  # an unknown time zone is a KeyError
+                    raise ValueError(f"bad schedule: {str(e).strip(chr(39))}") from None
+                return self._json(ui.tasks_view())
+            m = re.fullmatch(r"/api/schedules/([a-z0-9]{6,40})/(pause|resume|run|remove)", path)
+            if m:
+                sid, action = m.groups()
+                if not store.b.get("SCHEDULE", sid):
+                    return self._err(404, "no such schedule")
+                if action == "remove":
+                    store.remove_schedule(sid)
+                elif action == "run":
+                    store.run_schedule(sid, ui.cfg.max_depth, ui.cfg.max_attempts, by="ui")
+                else:
+                    store.pause_schedule(sid, action == "pause", by="ui")
+                return self._json(ui.tasks_view())
             if path == "/api/slack/allow":
                 ui.slack.set_allow([x.strip() for x in re.split(r"[,\s]+", str(data.get("allow") or "")) if x.strip()][:200])
                 return self._json(ui.slack.view())

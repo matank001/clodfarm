@@ -205,6 +205,8 @@ const ICONS = {
     { o: "#3c4a6b", b: "#1c9fd6", g: "#3cc36b", r: "#d97757" }],
   globe: [["...oooo...", "..obwbbo..", ".obwbbwbo.", "obbwbbwbbo", "owwwwwwwwo", "obbwbbwbbo", "owwwwwwwwo", ".obwbbwbo.", "..obwbbo..", "...oooo..."],
     { o: "#1b3a5a", b: "#1c9fd6", w: "#d8eef8" }],
+  tasks: [["..oyyyyo..", ".oooooooo.", ".owwwwwwo.", ".ogwllllo.", ".owwwwwwo.", ".ogwllllo.", ".owwwwwwo.", ".ogwllllo.", ".owwwwwwo.", ".oooooooo."],
+    { o: "#5a3d1e", y: "#c9964a", w: "#f6ecd0", g: "#3cc36b", l: "#9aa3b2" }],
   quill: [["........oo", ".......owo", "......owwo", ".....owwo.", "....owwo..", "...owwo...", "..oowo....", "..ooo.....", ".ooo......", "oo........"],
     { o: "#3a2a1a", w: "#f6ecd0" }],
 };
@@ -772,10 +774,10 @@ const UI = {
     try { const me = await api("api/me"); App.user = me.user; if (!this.goNext()) this.showFarm(); }
     catch { this.showTitle(); }
   },
-  /** Back to the page that sent you to log in (?next=dashboards/<name>, ?next=browser); only farm-local paths. */
+  /** Back to the page that sent you to log in (?next=dashboards/<name>, ?next=browser, ?next=tasks); only farm-local paths. */
   goNext() {
     const next = new URLSearchParams(location.search).get("next") || "";
-    if (!/^(dashboards(\/[a-z0-9-]{1,48})?|browser)$/.test(next)) return false;
+    if (!/^(dashboards(\/[a-z0-9-]{1,48})?|browser|tasks)$/.test(next)) return false;
     location.replace(next);
     return true;
   },
@@ -839,8 +841,8 @@ const UI = {
     if ($("#dlg-claude").open) this.renderClaude(st);
     const sl = $("#slack-tool"), ss = st.slack?.state;
     if (ss && ss !== "off") sl.dataset.state = ss === "live" ? "live" : ss === "error" ? "error" : "wait"; else delete sl.dataset.state;
-    sl.title = ss === "live" ? `On Slack (${st.slack.team || "connected"}): DM it or @mention it (S)` : "Give the farm work from Slack (S)";
-    sl.setAttribute("aria-label", ss === "live" ? "Slack: connected" : ss === "error" ? "Slack: error" : "Slack");
+    sl.dataset.tip = ss === "live" ? `On Slack: ${st.slack.team || "connected"}` : ss === "error" ? "Slack: needs a look" : "Connect Slack";
+    sl.setAttribute("aria-label", `${sl.dataset.tip} (S)`);
     if (st.paused) chips.push(h("span", { class: "chip warn" }, "⏸ PAUSED: " + (st.pause_reason || "").slice(0, 40).toUpperCase()));
     fill($("#chips"), ...chips);
   },
@@ -893,7 +895,7 @@ const UI = {
     }
     addEventListener("keydown", (e) => {
       if ($("#hud").hidden || $$("dialog[open]").length || /INPUT|TEXTAREA/.test(document.activeElement?.tagName) || e.metaKey || e.ctrlKey || e.altKey) return;
-      const k = { c: "hatch", h: "hatch", n: "hatch", s: "slack", t: "talk", d: "dashboards", b: "browser" }[e.key.toLowerCase()];
+      const k = { c: "hatch", h: "hatch", n: "hatch", s: "slack", t: "talk", d: "dashboards", b: "browser", j: "tasks" }[e.key.toLowerCase()];
       if (k) { e.preventDefault(); this.act(k); }
     });
   },
@@ -903,6 +905,7 @@ const UI = {
     if (a === "talk") return this.openClaude();
     if (a === "dashboards") location.href = "dashboards";
     if (a === "browser") location.href = "browser";
+    if (a === "tasks") location.href = "tasks";
   },
 
   // ------------------------------------------------------ talk to your Claude
@@ -1000,7 +1003,8 @@ const UI = {
         h("h3", { text: "ITS JOB" }), h("p", { class: "job-text", text: t.title }),
         kids.length ? [h("h3", { text: `ITS SUB-AGENTS (${kids.length})` }), h("ul", { class: "subs" }, kids.map(k => h("li", {}, badge(k), h("span", { text: k.title }))))] : null,
         h("h3", { text: "ITS SESSION" }), this.sessionList(c.agent.id, t.id),
-        h("p", { class: "muted small", text: `Its result: ask ${c.agent.name}, or run clodfarm result ${t.id}` })];
+        h("p", { class: "muted small", text: `Its result: ask ${c.agent.name}, or run clodfarm result ${t.id}` }),
+        h("p", { class: "small" }, h("a", { href: "tasks", text: "See, cancel or retry every sub-agent on the TASKS page →" }))];
       fill($("#sum-body"), parts); fill($("#sum-actions"));
       return;
     }

@@ -63,7 +63,8 @@ Run the commands below with Bash; add `--json` to any of them for machine-readab
 ## Schedules
 `clodfarm schedule add "<title>" --prompt "<instructions>" (--cron "0 9 * * 1-5" --tz <IANA zone> | --every 2h |
 --at "in 3h" | --at 2026-10-01T09:00 --tz <zone>) [--on <name>]` starts a sub-agent on a schedule;
-`clodfarm schedule list`, `clodfarm schedule remove <id>`. Ask the person for their time zone if you don't know it.
+`clodfarm schedule list`, `clodfarm schedule pause|resume|run|remove <id>`. Your person sees and manages every
+sub-agent and schedule on the farm UI's TASKS page. Ask the person for their time zone if you don't know it.
 
 ## Dashboards: show the improvement
 The farm has its own dashboards: pages at /dashboards/<name> that the person sees on the farm UI (the DASHBOARDS

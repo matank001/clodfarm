@@ -1,0 +1,88 @@
+/* the TASKS page: every sub-agent and schedule. dash.css gives the sign, the meadow and the paper; this adds the
+ * buttons, the rows that open to show a sub-agent's instructions and result, and the schedule form. */
+.wrap.wide { max-width: 1320px; padding-top: 20px; display: grid; grid-template-columns: minmax(0, 1fr); gap: 18px; }
+.top-actions { display: flex; align-items: center; gap: 10px; flex: none; }
+.top .chip { background: var(--paper); color: var(--ink); border: 3px solid #2f251b; box-shadow: 0 3px 0 #2f251b; }
+.chip.off .dot { background: #9aa3b2; box-shadow: none; }
+.chip.wait .dot { background: var(--hp-mid); box-shadow: 0 0 6px var(--hp-mid); }
+.btn {
+  font: 10px/1 var(--font-px); padding: 11px 14px; background: var(--paper); border: 3px solid var(--ink);
+  border-radius: 6px; box-shadow: 0 3px 0 var(--ink); color: var(--ink); white-space: nowrap;
+}
+.btn:hover { background: #fff; }
+.btn:active { transform: translateY(2px); box-shadow: 0 1px 0 var(--ink); }
+.btn.primary { background: var(--clay); color: #fff; border-color: #6b2f1f; box-shadow: 0 3px 0 #6b2f1f; }
+.btn.primary:hover { background: #e4865f; }
+.btn.danger { background: #f6d8d1; border-color: #7a2a1d; box-shadow: 0 3px 0 #7a2a1d; color: #7a2a1d; }
+.btn:disabled { opacity: .5; cursor: default; }
+.small-btn { font-size: 8px; padding: 8px 10px; }
+.form-error { color: var(--bad); min-height: 1em; margin: 8px 0 0; }
+.form-error:empty { display: none; }
+.bar-error { color: #fff; background: rgba(122, 42, 29, .85); padding: 6px 10px; border-radius: 4px; margin: 0; }
+.sr { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.paused-note { margin: 0; color: #fff; background: rgba(22, 30, 12, .72); padding: 8px 12px; border-radius: 4px;
+  border-left: 6px solid var(--hp-mid); }
+.panel-head { flex-wrap: wrap; }
+.empty-row { margin: 10px 0 0; }
+select, .sched-form input, .sched-form textarea {
+  font: 20px/1.1 var(--font-body); color: var(--ink); background: var(--white); border: 3px solid var(--ink);
+  border-radius: 6px; padding: 5px 8px; max-width: 100%;
+}
+select { font-size: 18px; }
+
+/* the rows: a sub-agent's title opens its details underneath */
+table.tasks td { vertical-align: middle; }
+table.tasks td.title { width: 44%; min-width: 16em; }
+.table-wrap { position: relative; }  /* keeps the hidden header labels inside its scroll box */
+table.tasks th.acts, table.tasks td.acts { text-align: right; padding-right: 0; }
+td.acts { white-space: nowrap; }
+td.acts .btn { margin: 3px 0 3px 6px; }
+td.when { min-width: 12em; }
+.table-wrap { overflow-x: auto; padding-bottom: 1px; }
+.open { all: unset; cursor: pointer; display: inline; color: var(--ink); border-bottom: 2px dotted var(--tan-3); }
+.open:hover, .open:focus-visible { color: var(--clay-2); border-color: var(--clay-2); }
+.open[aria-expanded="true"] { color: var(--clay-2); }
+.sub { display: block; font-size: 17px; color: var(--muted); margin-top: 2px; }
+.who { white-space: nowrap; }
+tr.details td { background: var(--white); border-bottom: 2px dashed var(--paper-2); padding: 10px 12px 14px; }
+.details h3 { font: 8px/1.8 var(--font-px); color: var(--clay-2); margin: 8px 0 4px; }
+.details h3:first-child { margin-top: 0; }
+.details pre { margin: 0; white-space: pre-wrap; word-break: break-word; font: 19px/1.15 var(--font-body); max-height: 22em;
+  overflow: auto; background: var(--paper); border: 3px solid var(--paper-2); border-radius: 4px; padding: 8px 10px; }
+.details dl { display: grid; grid-template-columns: max-content 1fr; gap: 2px 14px; margin: 0; font-size: 19px; }
+.details dt { color: var(--muted); }
+.details dd { margin: 0; }
+
+/* status badges, in the farm's colors */
+.st { display: inline-flex; align-items: center; gap: 6px; font: 8px/1 var(--font-px); padding: 5px 6px; border: 2px solid currentColor;
+  border-radius: 3px; white-space: nowrap; }
+.st i { width: 6px; height: 6px; background: currentColor; }
+.st.running { color: var(--good); } .st.running i { animation: blink 1.2s steps(2) infinite; }
+.st.waiting, .st.queued { color: #8a6a12; }
+.st.done { color: var(--s1); }
+.st.failed { color: var(--bad); }
+.st.cancelled, .st.paused { color: var(--muted); }
+.st.on { color: var(--good); }
+@keyframes blink { 50% { opacity: .2; } }
+
+/* the new-schedule form */
+.sched-form { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px 18px; margin: 0 0 18px;
+  padding: 14px 16px; background: var(--white); border: 3px solid var(--paper-2); border-radius: 8px; }
+.sched-form label, .sched-form legend { display: block; font: 8px/1.8 var(--font-px); color: var(--ink-2); }
+.sched-form label .muted { font: 17px/1 var(--font-body); }
+.sched-form input, .sched-form textarea, .sched-form select { display: block; width: 100%; margin-top: 4px; }
+.sched-form textarea { resize: vertical; min-height: 4.5em; }
+.sched-form .wide, .sched-form .form-actions, .sched-form .form-error { grid-column: 1 / -1; }
+.sched-form fieldset { border: 0; margin: 0; padding: 0; min-width: 0; }
+.seg-group { display: flex; gap: 6px; flex-wrap: wrap; margin: 4px 0 6px; }
+.seg-group label { display: inline-flex; align-items: center; gap: 6px; padding: 6px 8px; border: 3px solid var(--paper-2);
+  border-radius: 6px; cursor: pointer; }
+.seg-group label:has(input:checked) { border-color: var(--ink); background: var(--paper); }
+.seg-group input { width: auto; margin: 0; accent-color: var(--clay); }
+.form-actions { display: flex; gap: 10px; }
+
+@media (max-width: 760px) {
+  .top-actions .chip { display: none; }
+  table.tasks td.title { min-width: 12em; }
+}
+@media (prefers-reduced-motion: reduce) { .st.running i { animation: none; } }

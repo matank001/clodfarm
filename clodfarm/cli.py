@@ -10,7 +10,7 @@
     clodfarm msg NAME|ID TEXT [--urgent] [--wake] | inbox   talk to the other Claudes, sub-agents and connected Claude Codes
     clodfarm connect | connections | disconnect ID   Claude Code on your computer, over MCP (docs/mcp.md)
     clodfarm schedule add TITLE (--cron "0 9 * * 1-5" [--tz Europe/Berlin] | --every 2h | --at "in 3h") [--prompt TEXT] [--on NAME]
-    clodfarm schedule list | remove ID
+    clodfarm schedule list | remove ID | pause ID | resume ID | run ID
     clodfarm events [-n 30] [-f]      the farm's event log
     clodfarm pause [REASON] | resume  stop or restart new sub-agents on every box
     clodfarm ui | ui-passwd           serve the farm UI on its own | set its password
@@ -591,13 +591,29 @@ def cmd_schedule(cfg, a):
     if a.sub == "list":
         rows = store.schedules()
         _out(rows, a.json, "\n".join(
-            f"  {r['id']}  {describe(r):<32} next {_until(r['next_at']):<26} ran {r.get('runs', 0)}x  {r['title'][:60]}"
+            f"  {r['id']}  {describe(r):<32} next {'PAUSED' if r.get('paused') else _until(r['next_at']):<26} "
+            f"ran {r.get('runs', 0)}x  {r['title'][:60]}"
             + (f"  (on {r['to']})" if r.get("to") else "") for r in rows) or "(no schedules)")
         return 0
     if a.sub == "remove":
         ok = store.remove_schedule(a.id)
         print("removed" if ok else "no such schedule")
         return 0 if ok else 1
+    by = os.environ.get("FARM_TASK_ID") or cfg.name
+    if a.sub in ("pause", "resume"):
+        if not store.b.get("SCHEDULE", a.id):
+            print("no such schedule", file=sys.stderr)
+            return 1
+        sch = store.pause_schedule(a.id, a.sub == "pause", by=by) or store.b.get("SCHEDULE", a.id)
+        _out(sch, a.json, f"{a.id} " + ("paused" if sch.get("paused") else f"resumed; next run {_until(sch['next_at'])}"))
+        return 0
+    if a.sub == "run":
+        t = store.run_schedule(a.id, cfg.max_depth, cfg.max_attempts, by=by)
+        if not t:
+            print("no such schedule", file=sys.stderr)
+            return 1
+        _out(t, a.json, f"started sub-agent {t['id']}: {t['title']} (from schedule {a.id}). Its result: clodfarm result {t['id']}")
+        return 0
     return 1
 
 
@@ -987,6 +1003,9 @@ def main(argv=None):
     sa.add_argument("--on", help="run it on this Claude's account; default: whoever has budget")
     scs.add_parser("list")
     scs.add_parser("remove").add_argument("id")
+    scs.add_parser("pause", help="stop it firing until resumed").add_argument("id")
+    scs.add_parser("resume", help="fire again, from its next time").add_argument("id")
+    scs.add_parser("run", help="start its sub-agent now, once (its next time stays)").add_argument("id")
     for q in scs.choices.values():
         q.add_argument("--json", action="store_true")
     db = add("dashboard", cmd_dashboard, "dashboards the Claudes keep: pages at /dashboards/<name> that show improvements")
