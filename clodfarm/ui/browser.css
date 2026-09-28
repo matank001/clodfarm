@@ -17,7 +17,7 @@
 .form-error { color: var(--bad); min-height: 1em; margin: 8px 0 0; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 
-.intro { max-width: 760px; }
+.intro { max-width: 760px; margin-bottom: 14px; }
 .intro h2 { font-size: 12px; line-height: 1.6; margin-bottom: 12px; }
 
 .bar { display: flex; gap: 10px; margin: 0 0 14px; }
@@ -69,3 +69,28 @@
 .profile-actions { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; margin: 0 0 24px; }
 .btn.danger { background: #f6d8d1; border-color: #7a2a1d; box-shadow: 0 3px 0 #7a2a1d; color: #7a2a1d; }
 .confirm { display: inline-flex; flex-wrap: wrap; gap: 8px; align-items: center; color: #fff; text-shadow: 1px 1px 0 #1b2410; }
+
+/* the connection bar: DIRECT or VIA PROXY for the selected profile, and what sites see */
+.conn {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px 12px; margin: 0 0 14px; padding: 10px 12px;
+  background: var(--paper); border: 3px solid var(--ink); border-radius: 6px; box-shadow: 0 3px 0 var(--ink);
+}
+.conn-label { font: 8px/1 var(--font-px); color: var(--muted); }
+.switch { display: inline-flex; border: 3px solid var(--ink); border-radius: 6px; overflow: hidden; }
+.seg { font: 9px/1 var(--font-px); padding: 9px 12px; background: var(--white); color: var(--muted); border: 0; cursor: pointer; }
+.seg + .seg { border-left: 3px solid var(--ink); }
+.seg:hover { color: var(--ink); }
+.seg[aria-pressed="true"] { background: var(--ink); color: #fff; }
+.seg[aria-pressed="true"]::before { content: "● "; }
+#conn-proxy[aria-pressed="true"] { background: var(--hp-good); color: #1b2410; }
+.seg:disabled { cursor: default; opacity: .6; }
+.conn-country { font: 20px/1 var(--font-body); padding: 4px 8px; color: var(--ink); background: var(--white);
+  border: 3px solid var(--ink); border-radius: 6px; max-width: 16em; }
+.conn-state { flex: 1 1 18em; min-width: 0; font: 20px/1.2 var(--font-body); color: var(--ink); }
+.conn-state b { font-weight: 400; color: #2f5d16; }
+.conn-state.bad { color: #7a2a1d; }
+.proxy-form { flex-wrap: wrap; flex-basis: 100%; }
+.proxy-form input { width: 26em; max-width: 100%; }
+.proxy-hint { flex-basis: 100%; margin: 2px 0 0; color: var(--muted); }
+.proxy-error { flex-basis: 100%; margin: 0; }
+@media (max-width: 760px) { .conn-label { display: none; } }

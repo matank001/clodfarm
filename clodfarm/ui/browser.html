@@ -38,6 +38,32 @@
   </nav>
   <p class="form-error bar-error" id="bar-error" role="alert"></p>
 
+  <section class="conn" id="conn" aria-label="How this profile reaches the web" hidden>
+    <span class="conn-label">CONNECTION</span>
+    <div class="switch" role="group" aria-label="Direct, or through the farm's proxy">
+      <button type="button" class="seg" id="conn-direct" aria-pressed="true"
+        title="Sites see this box's own IP address">DIRECT</button>
+      <button type="button" class="seg" id="conn-proxy" aria-pressed="false"
+        title="Sites see the proxy's address (a running profile restarts, its tabs close)">VIA PROXY</button>
+    </div>
+    <label class="sr" for="conn-country">The country sites see</label>
+    <select id="conn-country" class="conn-country" hidden title="The country the proxy's address is in"></select>
+    <span class="conn-state" id="conn-state" aria-live="polite"></span>
+    <button type="button" class="btn small-btn" id="proxy-set" title="The farm's proxy: one address for every profile that uses it">SET PROXY</button>
+    <form class="add-form proxy-form" id="proxy-form" autocomplete="off" hidden>
+      <label class="sr" for="proxy-address">The farm's proxy: LOGIN:PASSWORD@HOST:PORT</label>
+      <input id="proxy-address" type="password" autocomplete="off" spellcheck="false"
+        placeholder="LOGIN:PASSWORD@gw.dataimpulse.com:10000">
+      <button type="submit" class="btn small-btn primary" id="proxy-save"
+        title="Log in to the proxy, keep it, and send this profile through it">CHECK &amp; TURN ON</button>
+      <button type="button" class="btn small-btn danger" id="proxy-forget" hidden>REMOVE PROXY</button>
+      <button type="button" class="btn small-btn" id="proxy-cancel">CANCEL</button>
+      <span class="small proxy-hint">DataImpulse: a port from 10000 to 20000 keeps one IP for about 30 minutes (823
+        changes it on every request). Pick the country after, here. HTTP only, not SOCKS5.</span>
+    </form>
+    <p class="bar-error proxy-error" id="proxy-error" role="alert"></p>
+  </section>
+
   <section class="card panel intro" id="off" hidden>
     <h2 id="off-h">THE FARM'S BROWSER</h2>
     <p class="lede" id="off-text">Chromium on this box. Log in to a site here once (LinkedIn, a dashboard, an admin

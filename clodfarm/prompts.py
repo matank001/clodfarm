@@ -106,7 +106,8 @@ LinkedIn, `linkedin-work` to another account). `clodfarm browser` lists the prof
 - Drive a profile with its MCP tools: `default` is `mcp__browser__*`, another profile `mcp__browser-<profile>__*`
   (navigate, snapshot, click, type, screenshot, tabs). Use the profile of the account the job is about; ask your
   person when you can't tell which one.
-- If a profile's tools can't connect, it is off: `clodfarm browser start <profile>`. Don't add or remove profiles.
+- If a profile's tools can't connect, it is off: `clodfarm browser start <profile>`. Don't add or remove profiles,
+  and don't turn a profile's proxy on or off (your person chose which address each account shows the site).
 - Open your own tab for your work and close it when you're done; don't close or navigate tabs you didn't open, and
   don't log out, change account settings or clear cookies.
 - Never type passwords or one-time codes, even ones you find. When a site needs a login (or a captcha), stop and ask

@@ -138,6 +138,11 @@ class Auth:
 
 
 # ---------------------------------------------------------------------- state
+def _from(seen: dict | None) -> str:
+    """Where a proxy check came out, for the event log: " (203.0.113.7, US)"."""
+    return f" ({seen['ip']}{', ' + seen['country'].upper() if seen.get('country') else ''})" if seen else ""
+
+
 def _public_task(t: dict, full: bool = False) -> dict:
     keep = ["id", "title", "status", "priority", "kind", "parent", "children", "depth", "created", "updated",
             "started", "finished", "attempts", "max_attempts", "worker", "branch", "created_by", "children_open", "owner",
@@ -694,6 +699,30 @@ def make_handler(ui: FarmUI):
                                 f"browser profile {name} {'started' if on else 'stopped'} from the farm UI", by="ui")
                 threading.Thread(target=ui.browsers.sync, name="browser-sync", daemon=True).start()
                 return self._json(ui.browsers.status())
+            if path == "/api/browser/proxy":  # a profile through the proxy (checked first, from a country) or direct
+                name, on = str(data.get("profile") or browser.DEFAULT), bool(data.get("on"))
+                country = str(data["country"])[:8] if data.get("country") is not None else None
+                changed, seen = ui.browsers.proxy(name, on, by="ui", country=country)
+                if changed:
+                    store.event("browser.proxy", f"browser profile {name} " + (f"through the proxy{_from(seen)}" if on
+                                else "direct") + " from the farm UI", by="ui")
+                threading.Thread(target=ui.browsers.sync, name="browser-sync", daemon=True).start()
+                return self._json({**ui.browsers.status(), "seen": seen})
+            if path == "/api/browser/proxy/address":  # set the farm's proxy (checked first), or "" to forget it
+                if os.environ.get(browser.PROXY_ENV):
+                    raise ValueError(f"{browser.PROXY_ENV} is set in the farm's environment: change it there")
+                text = str(data.get("address") or "")[:2000].strip()
+                if not text:
+                    browser.save_proxy(ui.cfg.workspace, None)
+                    store.event("browser.proxy", "the browser's proxy removed from the farm UI", by="ui")
+                    threading.Thread(target=ui.browsers.sync, name="browser-sync", daemon=True).start()
+                    return self._json(ui.browsers.status())
+                p, name = browser.parse_proxy(text), str(data.get("profile") or "")
+                seen = ui.browsers.set_proxy(p, name, by="ui")  # set from a profile: that profile goes through it
+                store.event("browser.proxy", f"the browser's proxy set to {p['host']}:{p['port']} from the farm UI"
+                            + (f"; profile {name} through it{_from(seen)}" if name else ""), by="ui")
+                threading.Thread(target=ui.browsers.sync, name="browser-sync", daemon=True).start()
+                return self._json({**ui.browsers.status(), "seen": seen})
             if path == "/api/browser/open":
                 url = browser.normalize_url(str(data.get("url", ""))[:2000])
                 slot = ui.browsers.slot(str(data.get("profile") or browser.DEFAULT))

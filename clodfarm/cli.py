@@ -16,6 +16,7 @@
     clodfarm ui | ui-passwd           serve the farm UI on its own | set its password
     clodfarm slack                    Slack: connected or not, and how to connect it (the UI's SLACK button is easier)
     clodfarm browser [status] | start|stop [PROFILE] | open URL [--profile P] | add|remove NAME   the farm's browser
+    clodfarm browser proxy on|off [PROFILE] [--country us]   through the farm's proxy (set in the UI), or direct
     clodfarm init                     create the DynamoDB table
     clodfarm doctor                   check claude, login, the store, git and the workspace
 
@@ -792,6 +793,17 @@ def cmd_browser(cfg, a):
                 print(f"clodfarm: profile {name} is {'not up' if on else 'still up'} yet: the farm (its UI process) "
                       "runs the browser; is `clodfarm run` up with FARM_UI=1? See `clodfarm browser`.", file=sys.stderr)
                 return 1
+        if a.sub == "proxy":
+            on = a.state == "on"
+            changed, seen = bs.proxy(name, on, by=cfg.name, country=a.country)
+            where = f" (the web sees {seen['ip']}{', ' + seen['country'].upper() if seen.get('country') else ''})" \
+                if seen else ""
+            if changed:
+                _store(cfg).event("browser.proxy", f"browser profile {name} {'through the proxy' if on else 'direct'}"
+                                  f"{where} by {cfg.name}", by=cfg.name)
+            print(f"browser profile {name} goes {'through the proxy' if on else 'direct'}{where}"
+                  + ("; the farm restarts it" if changed and bs.registry.get(name).get("on") else ""))
+            return 0
         if a.sub == "open":
             slot = bs.slot(name)
             if not browser.cdp_up(slot):
@@ -808,9 +820,13 @@ def cmd_browser(cfg, a):
         lines = []
         for p in st["profiles"]:
             state = "up" if p["ready"] else "starting" if p["on"] else "off"
-            lines.append(f"{p['name']:24} {state:9} tools {p['tools']}" + (f"  error: {p['error']}" if p["error"] else ""))
+            lines.append(f"{p['name']:24} {state:9} tools {p['tools']}"
+                         + (f"  via the proxy{' from ' + p['country'].upper() if p['country'] else ''}" if p["proxy"] else "")
+                         + (f"  error: {p['error'] or p['proxy_error']}" if p["error"] or p["proxy_error"] else ""))
             lines += [f"    {t['title'][:56] or '(untitled)':56}  {t['url'][:90]}" for t in p["tabs"]]
         text = "the farm's browser profiles (the person logs in to sites in the farm UI's BROWSER):\n  " + "\n  ".join(lines)
+        if st["proxy"]["set"]:
+            text += f"\nproxy: {st['proxy']['server']}" + (" (FARM_BROWSER_PROXY)" if st["proxy"]["from_env"] else "")
     return _out(st, a.json, text) or 0
 
 
@@ -953,6 +969,10 @@ def main(argv=None):
                         ("remove", "remove a profile and delete its logins")):
         brs.add_parser(verb, help=help_).add_argument("profile", nargs="?" if verb in ("start", "stop") else None,
                                                       help="the profile (default: default)")
+    bp = brs.add_parser("proxy", help="send a profile through the farm's proxy (on) or direct (off); it restarts")
+    bp.add_argument("state", choices=["on", "off"])
+    bp.add_argument("profile", nargs="?", help="the profile (default: default)")
+    bp.add_argument("--country", help="where it comes out, a two-letter code like us (DataImpulse); '' for any")
     bo = brs.add_parser("open", help="open an address in a new tab")
     bo.add_argument("url")
     bo.add_argument("--profile", help="the profile (default: default)")

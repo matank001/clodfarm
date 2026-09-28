@@ -16,6 +16,10 @@ Profile slot N uses DevTools port 9222+N, VNC port 5900+N and display :99+N. Log
 
 The profiles and which are on are a file (``.farm/browsers.json``): START in the UI or ``clodfarm browser start``
 turns one on, and it stays on across restarts until someone stops it. The farm UI's process keeps them running.
+
+A profile can go through the farm's proxy (PROXY in the UI, ``clodfarm browser proxy on``): one HTTP proxy with a
+login for the box, like DataImpulse's ``LOGIN:PASSWORD@gw.dataimpulse.com:823``. Chromium takes no login on its
+command line, so each proxied profile gets a relay on 127.0.0.1 that adds it (a login prompt would stop the Claudes).
 """
 
 from __future__ import annotations
@@ -30,6 +34,7 @@ import re
 import shutil
 import signal
 import socket
+import ssl
 import struct
 import subprocess
 import threading
@@ -236,6 +241,274 @@ class Registry:
             self._write(profiles)
         return True
 
+    def proxy(self, name: str, on: bool, by: str = "", country: str | None = None, seen: dict | None = None) -> bool:
+        """Send a profile through the farm's proxy (from ``country``, if given), or not; returns whether that changed
+        where it goes out. ``seen`` is what the check before it saw (its exit IP and country)."""
+        with self._locked():
+            profiles = self._read()
+            p = next((x for x in profiles if x["name"] == name), None)
+            if not p:
+                raise ValueError(f"no browser profile named {name}")
+            changed = bool(p.get("proxy")) != on or (country is not None and (p.get("country") or "") != country)
+            p.update(proxy=on, **({"country": country} if country is not None else {}),
+                     **({"proxy_seen": {**seen, "at": time.time()}} if seen else {}))
+            if changed:
+                p.update(proxy_by=by, proxy_at=time.time())
+            self._write(profiles)
+        return changed
+
+
+# --------------------------------------------------------------- the proxy
+PROXY_ENV = "FARM_BROWSER_PROXY"
+HOST_RE = re.compile(r"[A-Za-z0-9](?:[A-Za-z0-9.-]{0,251}[A-Za-z0-9])?")
+IP_CHECK = ("ipinfo.io", 443)  # answers with the address a request came from, and its country: the proxy's exit
+COUNTRY_RE = re.compile(r"[a-z]{2}")
+
+
+def parse_proxy(text: str) -> dict:
+    """An HTTP proxy and its login, the ways providers write it: ``http://LOGIN:PASSWORD@HOST:PORT``, the same
+    without ``http://``, or ``HOST:PORT:LOGIN:PASSWORD``. The login's ``%XX`` escapes are decoded."""
+    text = (text or "").strip()
+    scheme, sep, rest = text.partition("://")
+    if not sep:
+        scheme, rest = "http", text
+    if scheme.lower() != "http":
+        raise ValueError("the proxy must be an http:// one (Chromium can't log in to a SOCKS5 proxy)")
+    rest = rest.rstrip("/")
+    if "@" in rest:
+        login, _, hostport = rest.rpartition("@")
+        user, _, password = login.partition(":")
+    elif rest.count(":") >= 3:
+        host, port, user, password = rest.split(":", 3)
+        hostport = f"{host}:{port}"
+    else:
+        hostport, user, password = rest, "", ""
+    host, _, port = hostport.rpartition(":")
+    if not HOST_RE.fullmatch(host) or not port.isdigit() or not 0 < int(port) < 65536 or \
+            any(c in text for c in " \r\n\t"):
+        raise ValueError("a proxy is LOGIN:PASSWORD@HOST:PORT, e.g. LOGIN:PASSWORD@gw.dataimpulse.com:823")
+    return {"host": host, "port": int(port), "user": urllib.parse.unquote(user),
+            "password": urllib.parse.unquote(password)}
+
+
+def _proxy_path(workspace: str) -> str:
+    return os.path.join(workspace, ".farm", "browser-proxy.json")
+
+
+def load_proxy(workspace: str) -> dict | None:
+    """The farm's proxy: ``FARM_BROWSER_PROXY``, else the one saved from the farm UI (None: there is none)."""
+    if os.environ.get(PROXY_ENV):
+        try:
+            return {**parse_proxy(os.environ[PROXY_ENV]), "from_env": True}
+        except ValueError:
+            return None
+    try:
+        p = json.load(open(_proxy_path(workspace)))
+        return p if p.get("host") and p.get("port") else None
+    except (OSError, ValueError, AttributeError):
+        return None
+
+
+def save_proxy(workspace: str, p: dict | None):
+    """Keep the proxy (its password too, so the file is the owner's only), or forget it (None)."""
+    path = _proxy_path(workspace)
+    if p is None:
+        with contextlib.suppress(OSError):
+            os.remove(path)
+        return
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    fd = os.open(path + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump({k: p[k] for k in ("host", "port", "user", "password")}, f)
+    os.replace(path + ".tmp", path)
+
+
+def proxy_view(p: dict | None) -> dict:
+    """What the UI shows of the proxy: never its login."""
+    if not p:
+        return {"set": False}
+    return {"set": True, "server": f"{p['host']}:{p['port']}", "login": bool(p.get("user")),
+            "from_env": bool(p.get("from_env")), "countries": countries(p)}
+
+
+def countries(p: dict | None) -> bool:
+    """Whether the farm can choose this proxy's country: DataImpulse takes it in the login (``LOGIN__cr.us``)."""
+    return bool(p and p.get("user") and (p["host"].lower().endswith("dataimpulse.com") or p["host"] == "74.81.81.81"))
+
+
+def country_code(cc: str | None) -> str:
+    cc = (cc or "").strip().lower()
+    if cc and not COUNTRY_RE.fullmatch(cc):
+        raise ValueError("a country is its two-letter code, like us, de or gb")
+    return cc
+
+
+def with_country(p: dict, cc: str) -> dict:
+    """The proxy with a country in its login, DataImpulse's way: ``LOGIN__cr.us``, next to the login's other
+    options (``LOGIN__cr.us;sessttl.60``) and instead of a country it had. Other proxies are left as they are."""
+    if not cc or not countries(p):
+        return p
+    base, sep, opts = p["user"].partition("__")
+    keep = [o for o in opts.split(";") if o and not o.startswith("cr.")] if sep else []
+    return {**p, "user": base + "__" + ";".join([f"cr.{cc}", *keep])}
+
+
+def _auth(p: dict) -> bytes:
+    if not p.get("user"):
+        return b""  # an IP-whitelisted proxy
+    token = base64.b64encode(f"{p['user']}:{p.get('password', '')}".encode()).decode()
+    return f"Proxy-Authorization: Basic {token}\r\n".encode()
+
+
+def _head(s: socket.socket, limit: int = 1 << 16) -> tuple[bytes, bytes]:
+    """Read an HTTP head (up to the blank line) off a socket: the head, and what came after it."""
+    buf = b""
+    while b"\r\n\r\n" not in buf:
+        if len(buf) > limit:
+            raise ValueError("HTTP head too large")
+        data = s.recv(1 << 14)
+        if not data:
+            raise EOFError
+        buf += data
+    head, _, rest = buf.partition(b"\r\n\r\n")
+    return head + b"\r\n\r\n", rest
+
+
+def _status(head: bytes) -> int:
+    try:
+        return int(head.split(b"\r\n", 1)[0].split()[1])
+    except (IndexError, ValueError):
+        return 0
+
+
+def check_proxy(p: dict, timeout: float = 20.0) -> dict:
+    """Log in to the proxy and ask what the web sees: ``{"ip", "country", "city"}``. Raises ValueError with what went
+    wrong."""
+    try:
+        s = socket.create_connection((p["host"], p["port"]), timeout=timeout)
+    except OSError as e:
+        raise ValueError(f"can't reach the proxy {p['host']}:{p['port']} ({e.strerror or e})") from None
+    try:
+        host, port = IP_CHECK
+        s.sendall(f"CONNECT {host}:{port} HTTP/1.1\r\nHost: {host}:{port}\r\n".encode() + _auth(p) + b"\r\n")
+        head, _ = _head(s)
+        code = _status(head)
+        if code == 407:
+            raise ValueError("the proxy refused the login: check the login and password (or whitelist this box's IP)")
+        if code // 100 != 2:
+            raise ValueError("the proxy answered " + head.split(b"\r\n", 1)[0].decode(errors="replace")[:120])
+        t = ssl.create_default_context().wrap_socket(s, server_hostname=host)
+        t.sendall(f"GET /json HTTP/1.0\r\nHost: {host}\r\nAccept: application/json\r\n\r\n".encode())  # 1.0: no chunks
+        data = b""
+        while chunk := t.recv(4096):
+            data += chunk
+        try:
+            got = json.loads(data.partition(b"\r\n\r\n")[2])
+        except ValueError:
+            got = {}
+        ip = str(got.get("ip") or "") if isinstance(got, dict) else ""
+        if not re.fullmatch(r"[0-9a-fA-F.:]{3,45}", ip):
+            raise ValueError("the proxy connected, but the IP check gave no address")
+        return {"ip": ip, "country": str(got.get("country") or "")[:2].lower(), "city": str(got.get("city") or "")[:80]}
+    except (OSError, EOFError) as e:
+        raise ValueError(f"the proxy closed the connection ({e})") from None
+    finally:
+        s.close()
+
+
+class Relay:
+    """An HTTP proxy on 127.0.0.1 that sends every request on to the farm's proxy with its login. Chromium's
+    ``--proxy-server`` takes no login, and its login prompt would stop the Claudes. It answers only proxy requests
+    (CONNECT, or a full http:// address), so a page can't use it as a way out."""
+
+    def __init__(self, upstream: dict):
+        self.upstream = upstream
+        self.error = ""
+        self.sock = socket.socket()
+        self.sock.bind(("127.0.0.1", 0))
+        self.sock.listen(128)
+        self.sock.settimeout(0.5)
+        self.port = self.sock.getsockname()[1]
+        self.closed = threading.Event()
+        threading.Thread(target=self._serve, name=f"proxy-relay-{self.port}", daemon=True).start()
+
+    def close(self):
+        self.closed.set()
+        with contextlib.suppress(OSError):
+            self.sock.close()
+
+    def _serve(self):
+        while not self.closed.is_set():
+            try:
+                c, _ = self.sock.accept()
+            except socket.timeout:
+                continue
+            except OSError:
+                return
+            threading.Thread(target=self._handle, args=(c,), name="proxy-relay-conn", daemon=True).start()
+
+    def _handle(self, c: socket.socket):
+        up = None
+        try:
+            c.settimeout(30)
+            head, rest = _head(c)
+            line, _, fields = head[:-4].partition(b"\r\n")
+            parts = line.split()
+            if len(parts) != 3 or not (parts[0] == b"CONNECT" or parts[1].lower().startswith(b"http://")):
+                return c.sendall(b"HTTP/1.1 400 Bad Request\r\nConnection: close\r\nContent-Length: 0\r\n\r\n")
+            tunnel = parts[0] == b"CONNECT"
+            # drop what Chromium says to the proxy about its own login and keep-alive; a plain http:// request is
+            # one per connection (every request needs the login, and only the first one on a connection gets it)
+            drop = (b"proxy-authorization", b"proxy-connection") + (() if tunnel else (b"connection", b"keep-alive"))
+            keep = [f for f in fields.split(b"\r\n") if f and f.split(b":", 1)[0].strip().lower() not in drop]
+            out = b"\r\n".join([line, *keep]) + b"\r\n" + _auth(self.upstream) + \
+                (b"" if tunnel else b"Connection: close\r\n") + b"\r\n"
+            try:
+                up = socket.create_connection((self.upstream["host"], self.upstream["port"]), timeout=15)
+            except OSError as e:
+                self.error = f"can't reach the proxy {self.upstream['host']}:{self.upstream['port']} ({e.strerror or e})"
+                return c.sendall(b"HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n")
+            up.settimeout(None)
+            c.settimeout(None)
+            up.sendall(out + rest)
+            t = threading.Thread(target=_pipe, args=(c, up), name="proxy-relay-up", daemon=True)
+            t.start()  # a request body goes up while the answer is awaited
+            rhead, rrest = _head(up)
+            code = _status(rhead)
+            if code == 407:  # passed on, Chromium would show its login prompt: the farm's login is wrong instead
+                self.error = "the proxy refused its login: set it again in the farm UI (BROWSER, PROXY)"
+                return c.sendall(b"HTTP/1.1 502 Bad Gateway\r\nConnection: close\r\nContent-Length: 0\r\n\r\n")
+            if code // 100 == 2:
+                self.error = ""
+            if not tunnel:
+                rline, _, rfields = rhead[:-4].partition(b"\r\n")
+                rdrop = (b"connection", b"proxy-connection", b"keep-alive")
+                rkeep = [f for f in rfields.split(b"\r\n") if f and f.split(b":", 1)[0].strip().lower() not in rdrop]
+                rhead = b"\r\n".join([rline, *rkeep]) + b"\r\nConnection: close\r\n\r\n"
+            c.sendall(rhead + rrest)
+            _pipe(up, c)
+            t.join(5)
+        except (OSError, EOFError, ValueError):
+            pass
+        finally:
+            for s in (c, up):
+                if s is not None:
+                    with contextlib.suppress(OSError):
+                        s.close()
+
+
+def _pipe(src: socket.socket, dst: socket.socket):
+    """Copy until either side is done, then end both, so the other direction's copy ends too."""
+    try:
+        while data := src.recv(1 << 16):
+            dst.sendall(data)
+    except OSError:
+        pass
+    finally:
+        for s in (src, dst):
+            with contextlib.suppress(OSError):
+                s.shutdown(socket.SHUT_RDWR)
+
 
 class Browser:
     """One profile's Chromium: keeps its Xvfb, x11vnc and Chromium running while it is on."""
@@ -250,6 +523,8 @@ class Browser:
         self.error = ""
         self.hold_until = 0.0
         self.since = 0.0
+        self.proxy: dict | None = None  # the farm's proxy, when this profile goes through it
+        self.relay: Relay | None = None
         self._lock = threading.RLock()
 
     def alive(self, name: str) -> bool:
@@ -262,7 +537,7 @@ class Browser:
     def fresh(self):
         self.error, self.hold_until, self.started = "", 0.0, {}  # a new START gets a fresh try
 
-    def sync(self, on: bool):
+    def sync(self, on: bool, proxy: dict | None = None):
         with self._lock:
             if not (on and available()):
                 if self.procs:
@@ -270,6 +545,9 @@ class Browser:
                 return
             if time.time() < self.hold_until:
                 return
+            if self.alive("chromium") and proxy != self.proxy:
+                self._stop("chromium")  # Chromium takes its proxy when it starts: turning it on or off restarts it
+            self.proxy = proxy
             if not self.alive("xvfb"):
                 self.shutdown()  # everything draws on it
                 self._start("xvfb")
@@ -295,6 +573,7 @@ class Browser:
             self._clear_display()
         if name == "chromium":
             self._prepare_profile()
+            self._relay()
         cmd = self._cmd(name)
         env = {**os.environ, "DISPLAY": self.display}
         os.makedirs(os.path.dirname(self.log_path), exist_ok=True)
@@ -310,6 +589,14 @@ class Browser:
             self._wait(lambda: os.path.exists(self._socket()), p, 10)
         elif name == "chromium":
             self._wait(lambda: cdp_up(self.slot), p, 30)
+
+    def _relay(self):
+        """The relay this Chromium goes out through: one for its proxy, none without."""
+        if self.relay and self.relay.upstream != self.proxy:
+            self.relay.close()
+            self.relay = None
+        if self.proxy and not self.relay:
+            self.relay = Relay(self.proxy)
 
     def _socket(self) -> str:
         return f"/tmp/.X11-unix/X{self.display.lstrip(':')}"
@@ -331,6 +618,9 @@ class Browser:
             # goes to the viewer, so what you copy in the farm's browser lands on your own clipboard.
             return ["x11vnc", "-display", self.display, "-rfbport", str(vnc_port(self.slot)), "-localhost",
                     "-forever", "-shared", "-nopw", "-quiet", "-xkb", "-noprimary", "-noxrecord"]
+        # through the farm's proxy: WebRTC too (its UDP would show the box's own address), and localhost stays direct
+        proxy = [f"--proxy-server=http://127.0.0.1:{self.relay.port}",
+                 "--force-webrtc-ip-handling-policy=disable_non_proxied_udp"] if self.relay else []
         return [chromium_bin() or "chromium", f"--user-data-dir={self.profile}",
                 f"--remote-debugging-port={cdp_port(self.slot)}", "--remote-debugging-address=127.0.0.1",
                 "--no-first-run", "--no-default-browser-check", "--password-store=basic",
@@ -339,7 +629,7 @@ class Browser:
                 "--test-type",  # no "unsupported command-line flag" bar for --no-sandbox over every page
                 f"--window-size={w},{h}", "--window-position=0,0", "--start-maximized",
                 "--disable-features=Translate,MediaRouter", "--lang=" + _env("FARM_BROWSER_LANG", "en-US"),
-                *_env("FARM_BROWSER_ARGS", "").split(), _env("FARM_BROWSER_HOME", "about:blank")]
+                *proxy, *_env("FARM_BROWSER_ARGS", "").split(), _env("FARM_BROWSER_HOME", "about:blank")]
 
     def _prepare_profile(self):
         """A restart is a crash to Chromium: clear its lock from the old container and its "Restore pages?" bubble."""
@@ -382,20 +672,26 @@ class Browser:
         except OSError:
             pass
 
+    def _stop(self, name: str):
+        p = self.procs.pop(name, None)
+        if not p or p.poll() is not None:
+            return
+        try:
+            os.killpg(p.pid, signal.SIGTERM)
+            p.wait(10)
+        except subprocess.TimeoutExpired:
+            os.killpg(p.pid, signal.SIGKILL)
+        except (ProcessLookupError, PermissionError):
+            pass
+
     def shutdown(self):
         """Stop Chromium first (so it saves its cookies), then the screen."""
         with self._lock:
             for name in reversed(self.ORDER):
-                p = self.procs.pop(name, None)
-                if not p or p.poll() is not None:
-                    continue
-                try:
-                    os.killpg(p.pid, signal.SIGTERM)
-                    p.wait(10)
-                except subprocess.TimeoutExpired:
-                    os.killpg(p.pid, signal.SIGKILL)
-                except (ProcessLookupError, PermissionError):
-                    pass
+                self._stop(name)
+            if self.relay:
+                self.relay.close()
+                self.relay = None
             self.since = 0.0
 
 
@@ -432,11 +728,53 @@ class Browsers:
                     self._browser(p).fresh()
         return changed
 
+    def proxy(self, name: str, on: bool, by: str = "", country: str | None = None) -> tuple[bool, dict | None]:
+        """Send a profile through the farm's proxy, from its country (``country``: a new one, "" for any), or direct.
+        Going through it is checked first; returns whether that changed anything, and what the check saw."""
+        p = self.registry.get(name)
+        if not p:
+            raise ValueError(f"no browser profile named {name}")
+        seen, cc = None, None if country is None else country_code(country)
+        if on:
+            proxy = load_proxy(self.workspace)
+            if not proxy:
+                raise ValueError("the farm has no proxy yet: set its address first (SET PROXY in the farm UI's BROWSER)")
+            if cc and not countries(proxy):
+                raise ValueError("a country can be chosen for a DataImpulse proxy; with another one, put it in its login")
+            seen = check_proxy(with_country(proxy, (p.get("country") or "") if cc is None else cc))
+        return self._proxied(name, on, by, cc, seen), seen
+
+    def set_proxy(self, proxy: dict, profile: str = "", by: str = "") -> dict:
+        """Keep the farm's proxy once it works and, set from a profile, send that profile through it (from its
+        country). Returns what the check saw."""
+        p = self.registry.get(profile) if profile else None
+        if profile and not p:
+            raise ValueError(f"no browser profile named {profile}")
+        seen = check_proxy(with_country(proxy, (p or {}).get("country") or ""))
+        save_proxy(self.workspace, proxy)
+        if p:
+            self._proxied(profile, True, by, None, seen)
+        return seen
+
+    def _proxied(self, name: str, on: bool, by: str, country: str | None, seen: dict | None) -> bool:
+        changed = self.registry.proxy(name, on, by, country, seen)
+        with self._lock:
+            p = self.registry.get(name)
+            if p:
+                self._browser(p).fresh()  # its restart is no crash
+        return changed
+
     def sync(self):
         with self._lock:
-            profiles = self.registry.all()
+            profiles, proxy = self.registry.all(), load_proxy(self.workspace)
             for p in profiles:
-                self._browser(p).sync(bool(p.get("on")))
+                b = self._browser(p)
+                if p.get("proxy") and not proxy:  # never out through the box's own address instead
+                    b.sync(False)
+                    if p.get("on"):
+                        b.error = "PROXY is on for this profile but the farm has no proxy: set one, or turn PROXY off"
+                    continue
+                b.sync(bool(p.get("on")), with_country(proxy, p.get("country") or "") if p.get("proxy") else None)
             for name in set(self.running) - {p["name"] for p in profiles}:  # removed: stop it
                 self.running.pop(name).shutdown()
 
@@ -458,16 +796,20 @@ class Browsers:
     def status(self) -> dict:
         lack = missing() if enabled() else ["FARM_BROWSER=0"]
         w, h = size()
-        out = []
+        out, proxy = [], load_proxy(self.workspace)
         for p in self.registry.all():
             b = self.running.get(p["name"])
             up = not lack and cdp_up(int(p["slot"]))
             out.append({"name": p["name"], "on": bool(p.get("on")), "ready": up,
                         "running": bool(b and b.running()) or up, "tabs": tabs(int(p["slot"])) if up else [],
                         "error": b.error if b else "", "since": (b.since or None) if b else None,
-                        "tools": f"mcp__{mcp_name(p['name'])}__*"})
+                        "tools": f"mcp__{mcp_name(p['name'])}__*", "proxy": bool(p.get("proxy")),
+                        "country": (p.get("country") or "") if countries(proxy) else "",
+                        "proxy_seen": p.get("proxy_seen") if p.get("proxy") else None,
+                        "proxied": bool(b and b.relay and b.alive("chromium")),
+                        "proxy_error": b.relay.error if b and b.relay else ""})
         return {"available": not lack, "missing": lack, "size": f"{w}x{h}", "profiles": out,
-                "max": MAX_PROFILES}
+                "max": MAX_PROFILES, "proxy": proxy_view(proxy)}
 
 
 # ------------------------------------------------------- the Claudes' tools
