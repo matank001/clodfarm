@@ -44,6 +44,13 @@ anything on that box (every Claude, too) could send traffic through your proxy p
 so a web page can't use it. The login travels to the proxy the way HTTP proxies take it: in the clear, as with any
 tool that uses that proxy.
 
+## Bots
+
+A [bot](bots.md) sends its sub-agents' prompts, and the files they read, to its provider (OpenRouter, your Ollama, a
+gateway), under that provider's terms: free tiers may log them. Its API key is kept in the bot's own Claude config
+dir (`bot.json`, readable by the farm's user only) and the UI never shows it again. The container's Claude login is
+never passed to a bot.
+
 ## The optional apps role
 
 With [`deploy.sh apps-role`](deploy-aws.md#let-the-farm-build-apps-on-aws-optional) the agents can create real AWS

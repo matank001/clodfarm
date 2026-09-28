@@ -45,6 +45,8 @@ class Farm:
         self.cfg, self.store = cfg, store
         self.seat = cfg.seat or "default"  # the Claude account this box runs on; set from the login in wait_for_auth
         store.echo = True
+        if cfg.bot:  # every Claude on the farm sees it's a bot, and on which model
+            store.bot = {"bot": cfg.bot, "bot_via": cfg.bot_via or None, "bot_takes": cfg.bot_takes}
         self.stop = threading.Event()
         self.procs: dict[str, subprocess.Popen] = {}
         self.running: dict[str, Live | None] = {}  # the sub-agents running on this box (their stdin, when live)
@@ -90,7 +92,7 @@ class Farm:
         os.environ["FARM_MAIL_FLAG"] = os.path.join(self.cfg.mail_dir, self.cfg.name)
         self.store.event("farm.started", f"{self.cfg.farm_id}: {self.cfg.policy.max_workers} workers, "
                          f"model {self.cfg.model}, remote control {'on' if self.cfg.remote_control else 'off'}, "
-                         f"billing {'API key' if self.cfg.policy.api_mode else 'subscription'}")
+                         f"billing {self.billing()}")
         threads = []
         if self.updates_claude():
             self.update_claude()  # before Remote Control starts, so it starts on the newest version
@@ -168,7 +170,16 @@ class Farm:
             print(f"could not hand tasks back ({e!r}); their leases will expire", flush=True)
         self.store.event("farm.stopped", self.cfg.farm_id)
 
+    def billing(self) -> str:
+        if self.cfg.bot:
+            return f"bot on {self.cfg.bot}" + (f" via {self.cfg.bot_via}" if self.cfg.bot_via else "")
+        return "API key" if self.cfg.policy.api_mode else "subscription"
+
     def wait_for_auth(self):
+        if self.cfg.bot:  # no Claude login: its provider answered when it was added (bots.check)
+            self.seat = self.cfg.seat or f"bot-{self.cfg.name}"
+            print(f"{self.billing()}, seat {self.seat}, claude {self.cfg.name} on farm {self.cfg.farm}", flush=True)
+            return
         shown = 0.0
         while not self.stop.is_set():
             st = auth_status(self.cfg.claude_bin)
@@ -407,7 +418,8 @@ class Farm:
             self.stop.wait(wait)
             return
         try:
-            task = store.claim_next(holder, cfg.lease_seconds, cfg.farm_id, cfg.resume_affinity, agent=cfg.name)
+            task = store.claim_next(holder, cfg.lease_seconds, cfg.farm_id, cfg.resume_affinity, agent=cfg.name,
+                                    sent_only=bool(cfg.bot) and cfg.bot_takes != "any")
             if not task:
                 store.heartbeat(cfg.farm_id, wid, "idle", seat=self.seat)
                 store.release_slot(slot, holder)
@@ -568,9 +580,11 @@ class Farm:
                                             seven_day=after.seven_day if after else None), self.seat)
             store.update_task(tid, attempts=max(0, int(task.get("attempts", 1)) - 1))
             store.finish(tid, holder, False, "rate limited; re-queued", cfg.max_resumes)
-            store.event("budget.rejected", "subscription rate limit hit; workers pause until reset", task=tid)
+            who = f"{cfg.bot_via or 'its provider'} rate-limited bot {cfg.name}" if cfg.bot else "Claude reported a usage limit"
+            store.event("budget.rejected", f"{who}; workers pause until reset" if cfg.bot else
+                        "subscription rate limit hit; workers pause until reset", task=tid)
             snap = store.get_snapshot(self.seat)
-            self.notify(f"seat {self.seat} paused: usage limit", f"Claude reported a usage limit; this seat's agents wait until "
+            self.notify(f"seat {self.seat} paused: usage limit", f"{who}; this seat's agents wait until "
                         f"{iso(snap.resets_at) if snap and snap.resets_at else 'the reset'}.")
             return
 

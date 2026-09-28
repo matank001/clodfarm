@@ -57,6 +57,9 @@ The container's own login is the farm's first Claude. **+ NEW CLAUDE** (or an eg
 Log in with a different Claude account for each person. **Release** stops that Claude (its sub-agents wait for
 another Claude with budget), logs it out and deletes its config dir.
 
+**BOT: OTHER MODEL** in the same dialog adds a [bot](bots.md) instead: Claude Code on another model (OpenRouter,
+Ollama, any Anthropic-compatible API), with no login. The farm checks that the model answers before it keeps it.
+
 The token and API key from the container's environment (`CLAUDE_CODE_OAUTH_TOKEN`, `ANTHROPIC_API_KEY`) are never
 passed to hatched Claudes: each one uses only its own login.
 

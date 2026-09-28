@@ -64,6 +64,7 @@ class Store:
     def __init__(self, backend: Backend):
         self.b = backend
         self.echo = False  # the daemon prints every event as a JSON log line; the CLI stays quiet
+        self.bot: dict = {}  # a bot's daemon marks its heartbeats with its model (bot, bot_via, bot_takes)
 
     @classmethod
     def from_config(cls, cfg) -> "Store":
@@ -161,16 +162,17 @@ class Store:
         return self._update(*self._tkey(tid), fn) is not None
 
     def claim_next(self, worker: str, lease: int, farm: str | None = None, affinity: float = 600,
-                   agent: str | None = None) -> dict | None:
+                   agent: str | None = None, sent_only: bool = False) -> dict | None:
         """Atomically take the highest-priority queued task this box may take.
 
         A task handed to one Claude (``to``) is only taken by that agent's boxes (``agent`` is the box's farm name).
+        With ``sent_only`` (a bot) the box takes only those.
 
         A task waiting to be *resumed* keeps its conversation on the box it last ran on (``home``). For ``affinity``
         seconds only that box may take it; after that anyone may, starting fresh with the results so far."""
         for item in self.b.query_index("STATUS#queued", 100):
             tid = item["id"]
-            if item.get("to") and item["to"] != agent:
+            if (item.get("to") or sent_only) and item.get("to") != agent:
                 continue
             if farm and item.get("resume") and item.get("home") and item["home"] != farm \
                     and now() - float(item.get("updated", 0)) < affinity:
@@ -642,7 +644,7 @@ class Store:
     # --------------------------------------------------------- heartbeats/log
     def heartbeat(self, farm: str, worker: str, state: str, task: str | None = None, seat: str | None = None):
         self.b.put({k: v for k, v in {"PK": "WORKER", "SK": f"{farm}/{worker}", "ver": 1, "state": state, "task": task,
-                                      "seat": seat, "at": now(), "expires_at": int(now() + 86400)}.items()
+                                      "seat": seat, "at": now(), "expires_at": int(now() + 86400), **self.bot}.items()
                     if v is not None})
 
     def workers(self, max_age: int = 600) -> list[dict]:

@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- **Bots: other models on the farm** (#9). A bot is Claude Code on another model, through any provider that speaks
+  Anthropic's API: OpenRouter's free models, a local Ollama, a LiteLLM gateway. Add one in the farm UI (+ NEW CLAUDE,
+  BOT: OTHER MODEL) or with `clodfarm bot add`: the farm asks the model for one word first and keeps the bot only if
+  it answers. A bot uses no Claude account's usage. It takes only the sub-agents sent to it (`--on <bot>`, or any if
+  you say so), its own sub-agents stay on it, and it pauses when its provider rate-limits it. The guide tells your
+  Claudes to send it well-specified, low-risk jobs and check the result. Its key stays in its own config dir.
 - **Talk to your Claude while its sub-agents work.** In a conversation from the Claude app, a Claude used to wait for
   each sub-agent with `clodfarm result <id> --wait` in the foreground: one tool call that blocked for up to 10 minutes,
   so everything you typed waited until that sub-agent finished. The guide (and `clodfarm spawn`'s output) now has it

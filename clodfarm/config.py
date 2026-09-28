@@ -63,6 +63,9 @@ class Config:
     mail_wake_after: int  # a --wake message nobody read after this many seconds starts someone to handle it
     mail_max_hops: int  # message-triggered runs in a row before messages stop waking anyone
     mail_wakes_per_hour: int  # wakes per recipient and hour
+    bot: str  # FARM_BOT: this Claude is a bot, Claude Code on this model through another provider (see bots.py)
+    bot_via: str  # the bot's provider, as people call it (OpenRouter)
+    bot_takes: str  # a bot takes only the sub-agents sent to it ("sent"), or any ("any")
     policy: Policy
 
     @property
@@ -155,6 +158,9 @@ def load() -> Config:
         mail_wake_after=int(_env("FARM_MAIL_WAKE_AFTER", "120")),
         mail_max_hops=int(_env("FARM_MAIL_MAX_HOPS", "3")),
         mail_wakes_per_hour=int(_env("FARM_MAIL_WAKES_PER_HOUR", "6")),
+        bot=_env("FARM_BOT", ""),
+        bot_via=_env("FARM_BOT_VIA", ""),
+        bot_takes="any" if _env("FARM_BOT_TAKES", "sent") == "any" else "sent",
         policy=Policy(
             max_workers=int(_env("FARM_MAX_WORKERS", "3")),
             min_workers=int(_env("FARM_MIN_WORKERS", "1")),
@@ -164,7 +170,9 @@ def load() -> Config:
             five_hour_band=float(_env("FARM_FIVE_HOUR_BAND", "0.30")),
             burst_hours=float(_env("FARM_BURST_HOURS", "0")),
             allow_overage=_bool("FARM_ALLOW_OVERAGE", False),
-            api_mode=bool(os.environ.get("ANTHROPIC_API_KEY")) and not os.environ.get("CLAUDE_CODE_OAUTH_TOKEN"),
+            # a bot has no subscription windows either: it is paced like an API key, and pauses when rate-limited
+            api_mode=bool(os.environ.get("FARM_BOT")) or (bool(os.environ.get("ANTHROPIC_API_KEY"))
+                                                        and not os.environ.get("CLAUDE_CODE_OAUTH_TOKEN")),
             daily_budget_usd=float(_env("FARM_DAILY_BUDGET_USD", "0")),
         ),
     )

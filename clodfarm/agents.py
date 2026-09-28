@@ -8,6 +8,8 @@ second box on a multi-seat farm.
 
 Login runs ``claude auth login`` in a pseudo-terminal: the UI shows the URL it prints and types the code you paste
 back into it. clodfarm never stores or logs that code, or any credential.
+
+A *bot* (see bots.py) is an agent with a provider instead of a login: another model, through Claude Code.
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ import sys
 import threading
 import time
 
+from . import bots
 from .auth import auth_status, claude_home, share_session_registry
 
 ANSI = re.compile(r"\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)|\x1b[()][A-Z0-9]|\x1b[=>]")
@@ -175,8 +178,10 @@ class AgentManager:
     def get(self, aid: str) -> dict | None:
         return next((a for a in self.all() if a["id"] == aid), None)
 
-    def create(self, name: str) -> dict:
-        name = (name or "").strip()[:24] or "Claude"
+    def create(self, name: str, bot: dict | None = None, key: str = "") -> dict:
+        """A new agent: a Claude that waits for its login, or with ``bot`` (checked settings, see bots.parse) a bot on
+        another model, whose API key is kept in its own config dir."""
+        name = (name or "").strip()[:24] or ("Bot" if bot else "Claude")
         with self._lock:
             agents = self._load()
             taken = {a["id"] for a in self.all()}
@@ -189,6 +194,9 @@ class AgentManager:
             os.makedirs(d, mode=0o700, exist_ok=True)
             agent = {"id": aid, "name": name, "primary": False, "config_dir": d,
                      "hat": HATS[(len(agents) + 1) % len(HATS)], "created": time.time()}
+            if bot:
+                bots.save_key(d, key)
+                agent.update(bot=bot, hat="headphones")
             self._save(agents + [agent])
         self.spawn(agent)
         return agent
@@ -211,8 +219,9 @@ class AgentManager:
             if s:
                 s.kill()
             try:
-                subprocess.run([self.cfg.claude_bin, "auth", "logout"], env=self.env_for(agent), capture_output=True,
-                               timeout=60, stdin=subprocess.DEVNULL)
+                if not agent.get("bot"):  # a bot has no login: its key goes with its config dir
+                    subprocess.run([self.cfg.claude_bin, "auth", "logout"], env=self.env_for(agent),
+                                   capture_output=True, timeout=60, stdin=subprocess.DEVNULL)
             except (OSError, subprocess.TimeoutExpired):
                 pass  # its login is deleted below either way
             if os.path.realpath(agent["config_dir"]).startswith(os.path.realpath(self.base) + os.sep):
@@ -231,6 +240,8 @@ class AgentManager:
             env.pop("FARM_CLAUDE_NAME", None)  # that's the farm's own Claude, not this one
             env.update(FARM_NAME=agent["id"], FARM_HATCHED="1", FARM_FARM=self.cfg.farm, FARM_UI="0",
                        FARM_CONTAINER_NAME=os.environ.get("FARM_CONTAINER_NAME", "clodfarm"))
+            if agent.get("bot"):
+                env.update(bots.env(agent))
         return env
 
     def spawn(self, agent: dict):
@@ -296,6 +307,8 @@ class AgentManager:
 
     # ---------------------------------------------------------------- login
     def auth(self, agent: dict, max_age: float = 20) -> dict:
+        if agent.get("bot"):  # no Claude login: its provider answered when it was added
+            return {"loggedIn": True, "bot": True, "via": f"{bots.label(agent['bot'])} · {agent['bot']['model']}"}
         hit = self._auth_cache.get(agent["id"])
         s = self.logins.get(agent["id"])
         if hit and time.time() - hit[0] < max_age and not (s and s.state == "done" and not hit[1].get("loggedIn")):
@@ -309,6 +322,8 @@ class AgentManager:
         agent = self.get(aid)
         if not agent:
             raise KeyError(aid)
+        if agent.get("bot"):
+            raise ValueError("a bot has no Claude login: its provider and key were checked when it was added")
         with self._lock:
             old = self.logins.get(aid)
             if old and old.state in ("starting", "waiting_code", "checking"):

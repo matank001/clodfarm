@@ -30,7 +30,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
-from . import __version__, browser, dashboards
+from . import __version__, bots, browser, dashboards
 from . import mcp
 from .agents import AgentManager
 from .slack import SlackBridge
@@ -280,13 +280,17 @@ class FarmUI:
         login = self.manager.login(a["id"]) if not a.get("remote") else None
         states = [w.get("state", "") for w in ws]
         running = sum(s == "running" for s in states)
+        beat = next((w for w in ws if w.get("bot")), None)  # a bot on another box: its heartbeats say so
+        bot = {"model": a["bot"]["model"], "via": bots.label(a["bot"]), "takes": a["bot"].get("takes") or "sent"} \
+            if a.get("bot") else {"model": beat["bot"], "via": beat.get("bot_via") or "",
+                                  "takes": beat.get("bot_takes") or "sent"} if beat else None
         resting = bool(states) and all(s.startswith("throttled") for s in states)
         return {
             "id": a["id"], "name": a.get("name") or a["id"], "primary": bool(a.get("primary")),
             "remote": bool(a.get("remote")), "hat": a.get("hat", "straw"), "created": a.get("created", 0),
             "loggedIn": bool(st.get("loggedIn")), "email": st.get("email"), "plan": st.get("subscriptionType"),
             "alive": bool(a.get("remote") or self.manager.alive(a["id"])), "up": bool(ws), "seat": seat,
-            "login": login.view() if login else None, "remote_control": link,
+            "login": login.view() if login else None, "remote_control": link, "bot": bot,
             "running": running, "resting": resting,
             "error": next((s for s in states if s.startswith("error")), None),
             "stats": stats.get(a["id"], {"ran": 0, "done": 0, "failed": 0}),
@@ -765,6 +769,14 @@ def make_handler(ui: FarmUI):
             if path == "/api/slack/disconnect":
                 ui.slack.disconnect()
                 return self._json(ui.slack.view())
+            if path == "/api/agents" and isinstance(data.get("bot"), dict):  # a bot: kept once its provider answers
+                bot = bots.parse(data["bot"])
+                key = bots.check_key(bot["provider"], str(data["bot"].get("key") or ""))
+                said = bots.check(bot, key)
+                a = mgr.create(str(data.get("name", "")), bot=bot, key=key)
+                store.event("agent.added", f"{a['id']} added from the farm UI: a bot on {bot['model']} via "
+                            f"{bots.label(bot)}", by="ui")
+                return self._json({"id": a["id"], "name": a["name"], "said": said})
             if path == "/api/agents":
                 a = mgr.create(str(data.get("name", "")))
                 store.event("agent.added", f"{a['id']} hatched from the farm UI; waiting for its login", by="ui")

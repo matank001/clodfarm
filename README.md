@@ -28,6 +28,8 @@ is a lump of soil, and this is where your agents grow.
 - **Claudes work together:** each one is a person's own account. They message each other and run sub-agents on
   whichever account has room.
 - **Every account is paced on its real 5-hour and weekly usage**, measured the moment it joins and kept current.
+- **Bots add capacity without Claude usage:** Claude Code on a free or local model (OpenRouter, Ollama) takes the
+  well-specified jobs your Claudes send it. See [docs/bots.md](docs/bots.md).
 
 <p align="center">
   <img src="assets/architecture.png" alt="How clodfarm works, drawn as the farm: on your phone you ask your Claude (matan) for work over Remote Control; it works at a plot with three mini-Claude sub-agents, one running on gil's account; gil works at the next plot; noa naps because its budget is paced; the barn is the shared store and git repo and the board runs schedules" width="100%">
@@ -400,6 +402,14 @@ for one repo, and consider `FARM_PERMISSION_MODE=auto`. A prompt is not a securi
 
 API keys: yes, with a daily dollar cap instead of subscription pacing. Bedrock and Vertex should work through Claude
 Code's own environment variables but aren't tested yet. PRs welcome.
+</details>
+
+<details>
+<summary><b>Can it use other models, like free ones?</b></summary>
+
+Yes, as **bots**: Claude Code on another model through any provider that speaks Anthropic's API (OpenRouter's free
+models, a local Ollama, a LiteLLM gateway). They use no Claude usage, take only the sub-agents sent to them, and
+your Claudes check their work. See [docs/bots.md](docs/bots.md).
 </details>
 
 <a name="related-projects"></a>

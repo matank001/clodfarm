@@ -17,6 +17,7 @@
     clodfarm slack                    Slack: connected or not, and how to connect it (the UI's SLACK button is easier)
     clodfarm browser [status] | start|stop [PROFILE] | open URL [--profile P] | add|remove NAME   the farm's browser
     clodfarm browser proxy on|off [PROFILE] [--country us]   through the farm's proxy (set in the UI), or direct
+    clodfarm bot add NAME --provider openrouter|ollama|custom --model M [--url U] [--any]   a bot on another model
     clodfarm init                     create the DynamoDB table
     clodfarm doctor                   check claude, login, the store, git and the workspace
 
@@ -113,6 +114,9 @@ def _seats(cfg, store) -> list[dict]:
         snap = snaps.get(seat)
         policy = cfg.policy if seat.startswith("api-") == cfg.policy.api_mode else \
             type(cfg.policy)(**{**vars(cfg.policy), "api_mode": seat.startswith("api-")})
+        if seat.startswith("bot-"):  # a bot: paced like an API key, on its own workers, with no money cap
+            policy = type(cfg.policy)(**{**vars(cfg.policy), "api_mode": True, "daily_budget_usd": 0.0,
+                                         "max_workers": max(1, sum(w.get("seat") == seat for w in workers))})
         d = decide(snap, policy, now(), store.spent_today(seat))
         out.append({"seat": seat, "snapshot": snap, "decision": d, "policy": policy, "slots": store.slots(seat),
                     "boxes": sorted({w["SK"].rsplit("/", 1)[0] for w in workers if w.get("seat") == seat})})
@@ -123,7 +127,9 @@ def _seat_text(r) -> str:
     seat, snap, d, p = r["seat"], r["snapshot"], r["decision"], r["policy"]
     boxes = f"  boxes: {', '.join(r['boxes'])}" if r["boxes"] else "  (no live box)"
     lines = [f"SEAT {seat}{boxes}"]
-    if p.api_mode:
+    if seat.startswith("bot-"):
+        lines.append("  a bot on another model: no Claude usage; it pauses when its provider rate-limits it")
+    elif p.api_mode:
         cap = f"${p.daily_budget_usd:.2f}/day" if p.daily_budget_usd else "no daily cap (set FARM_DAILY_BUDGET_USD)"
         lines.append(f"  API key, list-price spend ${d.details.get('spent_today_usd', 0):.2f} today, {cap}")
     elif not snap:
@@ -182,7 +188,9 @@ def _claudes(cfg, store) -> list[dict]:
         box = w["SK"].rsplit("/", 1)[0]
         name = box.split("@")[0]
         c = out.setdefault(name, {"name": name, "me": name == cfg.name, "seat": w.get("seat"), "boxes": set(),
-                                  "running": 0})
+                                  "running": 0, "bot": None})
+        if w.get("bot"):
+            c["bot"] = {"model": w["bot"], "via": w.get("bot_via") or "", "takes": w.get("bot_takes") or "sent"}
         c["boxes"].add(box)
         c["seat"] = c["seat"] or w.get("seat")
         c["running"] += w.get("state") == "running"
@@ -200,6 +208,10 @@ def _claudes(cfg, store) -> list[dict]:
 def _claude_line(c) -> str:
     pct = lambda x: "?" if x is None else f"{x:.0%}"  # noqa: E731
     used = f"5h {pct(c['five_hour_used'])} used · 7d {pct(c['seven_day_used'])} used"
+    if c.get("bot"):
+        b = c["bot"]
+        used = f"BOT on {b['model']}" + (f" via {b['via']}" if b["via"] else "") + \
+            (" · takes any sub-agent" if b["takes"] == "any" else f" · takes only what is sent to it (--on {c['name']})")
     busy = f"{c['running']} sub-agent{'s' if c['running'] != 1 else ''} running"
     room = f"can start {c['can_start']} more" if c["can_start"] else \
         f"{'no room for more' if c['running'] else 'resting'}: {c['reason']}" \
@@ -212,7 +224,9 @@ def cmd_agents(cfg, a):
     _out(rows, a.json, "CLAUDES on this farm (each is its own Claude account and budget)\n"
          + ("\n".join(_claude_line(c) for c in rows) or "  (none up: is `clodfarm run` running?)")
          + "\n\nStart a sub-agent: clodfarm spawn \"<title>\" --prompt \"...\"  (any Claude with budget runs it; "
-           "--on NAME picks one)\nMessage a Claude:  clodfarm msg NAME \"<text>\"")
+           "--on NAME picks one)\nMessage a Claude:  clodfarm msg NAME \"<text>\""
+         + ("\nA BOT is Claude Code on another model (no Claude usage, but weaker): send it only well-specified, "
+            "low-risk jobs with --on, and check its result." if any(c.get("bot") for c in rows) else ""))
     return 0
 
 
@@ -260,7 +274,10 @@ def cmd_spawn(cfg, a):
             print(f"{cfg.max_queue} sub-agents are already waiting: not adding. Do it yourself or wait.", file=sys.stderr)
             return 3
         on = (a.on or "").strip() or None
-        if on and on not in _names(cfg, store) and not a.force:
+        stay = bool(me and cfg.bot and not on)
+        if stay:
+            on = cfg.name  # a bot's own sub-agents stay on it: a bot never spends a Claude account's usage
+        if on and not stay and on not in _names(cfg, store) and not a.force:
             print(f"no Claude named '{on}' is on the farm right now ({', '.join(sorted(_names(cfg, store))) or 'none'});"
                   " see `clodfarm agents`, or add --force to wait for it", file=sys.stderr)
             return 2
@@ -862,6 +879,39 @@ def cmd_ui_passwd(cfg, a):
     return 0
 
 
+def cmd_bot(cfg, a):
+    """Add a bot: Claude Code on another model, through a provider that speaks Anthropic's Messages API. The
+    farm UI's process starts it within seconds (its agents are kept running there)."""
+    import getpass
+    from . import bots
+    from .agents import AgentManager
+    if a.sub != "add":
+        print("usage: clodfarm bot add NAME --provider openrouter|ollama|custom --model MODEL [--url URL] [--any]\n"
+              "(release a bot in the farm UI, like any Claude)", file=sys.stderr)
+        return 2
+    try:
+        bot = bots.parse({"provider": a.provider, "url": a.url, "model": a.model, "workers": a.workers,
+                          "takes": "any" if a.any else "sent"})
+        need = bots.PROVIDERS[bot["provider"]]["key"]
+        if a.key_env:
+            key = os.environ.get(a.key_env, "")
+        elif not sys.stdin.isatty():
+            key = sys.stdin.readline().strip()
+        else:
+            key = getpass.getpass(f"{bots.label(bot)} API key{'' if need else ' (Enter for none)'}: ")
+        key = bots.check_key(bot["provider"], key)
+        said = bots.check(bot, key)
+    except ValueError as e:
+        print(f"clodfarm: {e}", file=sys.stderr)
+        return 1
+    agent = AgentManager(cfg).create(a.name, bot=bot, key=key)
+    _store(cfg).event("agent.added", f"{agent['id']} added: a bot on {bot['model']} via {bots.label(bot)}", by=cfg.name)
+    print(f"bot {agent['id']} added: {bot['model']} via {bots.label(bot)} answered \"{said}\". The farm UI's process "
+          f"starts it in a few seconds; send it work with `clodfarm spawn ... --on {agent['id']}`"
+          + (" (it also takes any sub-agent)" if bot["takes"] == "any" else ""))
+    return 0
+
+
 def cmd_run(cfg, a):
     from .supervisor import Farm
     Farm(cfg, _store(cfg)).run()
@@ -966,6 +1016,16 @@ def main(argv=None):
     for q in dbs.choices.values():
         q.add_argument("--json", action="store_true")
     add("slack", cmd_slack, "give the farm work from Slack: status, or how to connect it")
+    bt = add("bot", cmd_bot, "add a bot: Claude Code on another model (OpenRouter, Ollama, any Anthropic-compatible API)")
+    bts = bt.add_subparsers(dest="sub")
+    ba = bts.add_parser("add", help="add a bot; its API key is read from stdin (or --key-env)")
+    ba.add_argument("name")
+    ba.add_argument("--provider", default="openrouter", choices=["openrouter", "ollama", "custom"])
+    ba.add_argument("--model", required=True, help="the model, as the provider names it (qwen/qwen3-coder:free)")
+    ba.add_argument("--url", help="the provider's base URL (default: the provider's own)")
+    ba.add_argument("--workers", type=int, default=1, help="sub-agents it runs at a time (1-4; free tiers: 1)")
+    ba.add_argument("--any", action="store_true", help="take any sub-agent, not only the ones sent to it")
+    ba.add_argument("--key-env", help="read the API key from this environment variable instead of stdin")
     br = add("browser", cmd_browser, "the farm's browser: you log in to sites in the UI, the Claudes use it")
     brs = br.add_subparsers(dest="sub")
     brs.add_parser("status", help="every profile: on or off, and its tabs")

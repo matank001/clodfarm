@@ -89,7 +89,9 @@ def main(argv):
         prompt = sys.stdin.read()
     session = argv[argv.index("--resume") + 1] if "--resume" in argv else str(uuid.uuid4())
     log({"cmd": "print", "argv": argv, "cwd": os.getcwd(), "prompt": prompt, "task": os.environ.get("FARM_TASK_ID"),
-         "resume": "--resume" in argv, "live": live})
+         "resume": "--resume" in argv, "live": live,
+         "base_url": os.environ.get("ANTHROPIC_BASE_URL"), "token": os.environ.get("ANTHROPIC_AUTH_TOKEN"),
+         "model": argv[argv.index("--model") + 1] if "--model" in argv else None})
     now = time.time()
     u5, u7 = float(os.environ.get("FAKE_UTIL_5H", "0.10")), float(os.environ.get("FAKE_UTIL_7D", "0.10"))
     out({"type": "system", "subtype": "init", "session_id": session, "model": "claude-opus-5-5",

@@ -23,6 +23,15 @@ function mulberry32(a) {
   return () => { a |= 0; a = (a + 0x6d2b79f5) | 0; let t = Math.imul(a ^ (a >>> 15), 1 | a);
     t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t; return ((t ^ (t >>> 14)) >>> 0) / 4294967296; };
 }
+// the providers a bot can use (clodfarm/bots.py has the same list; the farm checks what's sent)
+const BOT_PROVIDERS = {
+  openrouter: { label: "OpenRouter", url: "https://openrouter.ai/api", key: true, example: "qwen/qwen3-coder:free",
+    hint: "Free models end in :free (openrouter.ai/models, filter by price). Make a key at openrouter.ai/keys. Free tiers allow a few requests a minute: the bot pauses when it hits that." },
+  ollama: { label: "Ollama", url: "http://host.docker.internal:11434", key: false, example: "qwen3-coder",
+    hint: "Ollama on the machine running the farm's container: pull a model that can use tools first (ollama pull qwen3-coder)." },
+  custom: { label: "Anthropic-compatible", url: "", key: false, example: "",
+    hint: "Any endpoint that speaks Anthropic's Messages API, like a LiteLLM gateway. The address is its base URL, without /v1." },
+};
 function hashStr(s) { let x = 2166136261; for (const c of String(s)) { x ^= c.charCodeAt(0); x = Math.imul(x, 16777619); } return x >>> 0; }
 /** replaceChildren that flattens arrays and drops null/false (plain replaceChildren would print "null"). */
 function fill(el, ...kids) { el.replaceChildren(...kids.flat(3).filter(k => k != null && k !== false)); return el; }
@@ -745,7 +754,8 @@ const EVENT_TEXT = {
   "farm.resumed": () => "The farm is back at work!",
   "budget.rejected": () => "A Claude hit its usage limit. It rests until the window resets; the others carry on.",
   "rc.connected": (e) => `${((e.msg.match(/'([^']+)'/) || [])[1] || "A Claude").toUpperCase()} is live in the Claude app: talk to it from your phone.`,
-  "agent.added": (e) => `A new egg for ${e.msg.split(" ")[0].toUpperCase()}. Finish its login to hatch it.`,
+  "agent.added": (e) => / a bot on /.test(e.msg) ? `${e.msg.split(" ")[0].toUpperCase()} joined the farm: a bot on ${e.msg.split(" a bot on ")[1]}.`
+    : `A new egg for ${e.msg.split(" ")[0].toUpperCase()}. Finish its login to hatch it.`,
   "slack.received": (e) => `FROM SLACK · ${e.msg.slice(0, 120)}`,
   "slack.connected": () => "The farm is on Slack! DM it or @mention it in a channel, and a sub-agent answers in the thread.",
   "agent.removed": (e) => `${e.msg.split(" ")[0].toUpperCase()} left the farm.`,
@@ -960,6 +970,7 @@ const UI = {
     if (a.error) return a.error.toUpperCase();
     const n = App.state.subagents.filter(t => t.owner === a.id).length;
     if (n) return `${n} SUB-AGENT${n === 1 ? "" : "S"} AT WORK`;
+    if (a.bot) return a.resting ? "RESTING: " + (a.budget?.reason || "paced").toUpperCase() : "READY: SEND IT WORK";
     if (a.talking) return a.talking.n > 1 ? `WORKING IN ${a.talking.n} CONVERSATIONS` : "WORKING IN A CONVERSATION";
     if (a.resting) return "RESTING: " + (a.budget?.reason || "paced by its budget").toUpperCase();
     return "READY: TALK TO IT";
@@ -996,15 +1007,22 @@ const UI = {
     const a = st.agents.find(x => x.id === c.agent.id) || c.agent, b = a.budget || {};
     const mine = st.subagents.filter(t => t.owner === a.id), elsewhere = st.subagents.filter(t => t.on === a.id && t.owner !== a.id);
     $("#sum-name").textContent = a.name.toUpperCase();
-    $("#sum-sub").textContent = [a.plan && `Claude ${a.plan}`, a.email].filter(Boolean).join(" · ");
+    $("#sum-sub").textContent = a.bot ? `BOT · ${a.bot.model}` + (a.bot.via ? ` via ${a.bot.via}` : "")
+      : [a.plan && `Claude ${a.plan}`, a.email].filter(Boolean).join(" · ");
     parts = [h("dl", { class: "stat-row" },
       h("dt", { text: "STATUS" }), h("dd", { text: this.agentState(a) }),
       a.stats ? [h("dt", { text: "RAN (7D)" }), h("dd", { text: `${a.stats.ran} sub-agents · ${a.stats.done} done · ${a.stats.failed} failed` })] : null)];
-    if (a.loggedIn) parts.push(h("h3", { text: "TALK TO IT" }), a.remote_control
+    if (a.bot) parts.push(h("h3", { text: "SEND IT WORK" }),
+      h("p", { class: "muted small", text: `It's Claude Code on ${a.bot.model}, not Claude: it uses no Claude account's usage, but it's weaker. ` +
+        (a.bot.takes === "any" ? "It takes any sub-agent, " : "It takes only the sub-agents sent to it, ") +
+        `so ask a Claude to hand it a well-specified job with --on ${a.id}, or run: clodfarm spawn "<title>" --prompt "…" --on ${a.id}` }));
+    else if (a.loggedIn) parts.push(h("h3", { text: "TALK TO IT" }), a.remote_control
       ? [h("a", { class: "btn primary login-link", href: a.remote_control, target: "_blank", rel: "noopener noreferrer" }, "OPEN IN THE CLAUDE APP ↗"),
         h("p", { class: "muted small", text: `Or open the Claude app, go to Code and pick “${sessionName(st, a.name)}”. It starts sub-agents, asks the other Claudes for help and schedules work, and it watches its budget.` })]
       : h("p", { class: "muted small", text: a.remote ? "It lives on another box: talk to it from its own Claude app." : `Its Remote Control session is starting. It shows up in the Claude app under Code as “${sessionName(st, a.name)}”.` }));
-    parts.push(h("h3", { text: "USAGE" }), this.hp("5H", b.five_hour, b.five_hour_resets), this.hp("7D", b.seven_day, b.seven_day_resets),
+    if (a.bot) parts.push(h("h3", { text: "PACE" }), h("p", { class: "muted small", text: (b.can_start ? `It can start ${b.can_start} more sub-agent${b.can_start === 1 ? "" : "s"} now. ` : b.reason ? `No new sub-agents now: ${b.reason}. ` : "")
+      + `It pauses when ${a.bot.via || "its provider"} rate-limits it.` }));
+    else parts.push(h("h3", { text: "USAGE" }), this.hp("5H", b.five_hour, b.five_hour_resets), this.hp("7D", b.seven_day, b.seven_day_resets),
       h("p", { class: "muted small", text: b.measured ? `Measured ${ago(b.measured)}. ` + (b.can_start ? `It can start ${b.can_start} more sub-agent${b.can_start === 1 ? "" : "s"} now.` : `No new sub-agents on its account now: ${b.reason}.`)
         : "Measuring its usage…" }));
     if (mine.length) parts.push(h("h3", { text: `ITS SUB-AGENTS (${mine.length})` }), h("ul", { class: "subs" }, mine.map(t => h("li", {}, badge(t),
@@ -1018,7 +1036,7 @@ const UI = {
     if (a && !a.primary && !a.remote && !c.mini) {
       const rel = h("button", { class: "btn danger", type: "button" }, "RELEASE");
       rel.addEventListener("click", async () => {
-        if (rel.dataset.sure !== "1") { rel.dataset.sure = "1"; rel.textContent = "SURE? LOGS IT OUT"; return; }
+        if (rel.dataset.sure !== "1") { rel.dataset.sure = "1"; rel.textContent = a.bot ? "SURE? FORGETS ITS KEY" : "SURE? LOGS IT OUT"; return; }
         rel.disabled = true; rel.textContent = "RELEASING…";
         try { await api(`api/agents/${a.id}/remove`, {}); $("#dlg-summary").close(); this.say(`${a.name.toUpperCase()} left the farm. Bye bye!`); this.refresh(); }
         catch (x) { rel.textContent = x.message.slice(0, 40); }
@@ -1205,8 +1223,12 @@ const UI = {
     if (agentId) { this.renderHatch({ state: "starting" }); this.beginLogin(agentId); }
     else this.renderHatchName();
   },
-  renderHatchName() {
-    const form = h("form", {},
+  renderHatchName(kind = "claude") {
+    const pick = h("div", { class: "hatch-kind", role: "group", "aria-label": "What to add" },
+      h("button", { class: "btn" + (kind === "claude" ? " primary" : ""), type: "button", "aria-pressed": String(kind === "claude"), onclick: () => this.renderHatchName("claude") }, "CLAUDE ACCOUNT"),
+      h("button", { class: "btn" + (kind === "bot" ? " primary" : ""), type: "button", "aria-pressed": String(kind === "bot"), onclick: () => this.renderHatchName("bot") }, "BOT: OTHER MODEL"));
+    if (kind === "bot") return this.renderBotForm(pick);
+    const form = h("form", {}, pick,
       h("canvas", { class: "egg-anim", width: 12, height: 12, id: "egg-cv" }),
       h("label", {}, "NAME ", h("span", { class: "muted", text: "(optional)" }), h("input", { name: "name", maxlength: 24, placeholder: "e.g. gil or night-shift", autocomplete: "off" })),
       h("p", { class: "muted", text: "A new Claude Code login with its own agents. Log in with another Claude account to add capacity: each account is paced on its own budget. The same account again just shares its budget." }),
@@ -1214,13 +1236,56 @@ const UI = {
       h("div", { class: "dlg-actions" }, h("button", { class: "btn primary", type: "submit" }, "▶ ADD CLAUDE")));
     form.addEventListener("submit", async (e) => {
       e.preventDefault();
-      const btn = form.querySelector("button"); btn.disabled = true;
+      const btn = form.querySelector("button[type=submit]"); btn.disabled = true;
       try { const a = await api("api/agents", { name: new FormData(form).get("name") }); this.hatchFor = a.id; this.renderHatch({ state: "starting" }); this.pollHatch(); this.refresh(); }
       catch (x) { form.querySelector(".form-error").textContent = x.message; btn.disabled = false; }
     });
     fill($("#hatch-body"), form);
     $("#egg-cv").getContext("2d").drawImage(EGG, 0, 0);
     form.querySelector("input").focus();
+  },
+  renderBotForm(pick) { // a bot: Claude Code on another model, through a provider that speaks Anthropic's API
+    const P = BOT_PROVIDERS;
+    const url = h("input", { name: "url", autocomplete: "off", spellcheck: "false", required: true }),
+      model = h("input", { name: "model", autocomplete: "off", spellcheck: "false", required: true, maxlength: 128 }),
+      key = h("input", { name: "key", type: "password", autocomplete: "off", spellcheck: "false", maxlength: 500 }),
+      keyNote = h("span", { class: "muted" }), hint = h("p", { class: "muted small" });
+    const provider = h("select", { name: "provider" }, Object.entries(P).map(([k, p]) => h("option", { value: k, text: p.label })));
+    const sync = () => {
+      const p = P[provider.value];
+      url.value = p.url; url.placeholder = p.url || "https://your-gateway.example.com";
+      model.placeholder = p.example ? `e.g. ${p.example}` : "the model, as the provider names it";
+      key.required = p.key; keyNote.textContent = p.key ? "" : " (optional)"; hint.textContent = p.hint;
+    };
+    provider.addEventListener("change", sync);
+    const form = h("form", {}, pick,
+      h("p", { class: "muted", text: "A bot is Claude Code on another model: a free one on OpenRouter, or your own through Ollama. It uses no Claude account's usage, but it's weaker than Claude, so it takes only the sub-agents sent to it." }),
+      h("label", {}, "NAME ", h("span", { class: "muted", text: "(optional)" }), h("input", { name: "name", maxlength: 24, placeholder: "e.g. qwen or night-bot", autocomplete: "off" })),
+      h("label", {}, "PROVIDER", provider),
+      h("label", {}, "ADDRESS", url),
+      h("label", {}, "MODEL", model),
+      h("label", {}, "API KEY", keyNote, key),
+      hint,
+      h("label", { class: "check" }, h("input", { name: "any", type: "checkbox" }), "ALSO TAKE ANY SUB-AGENT ", h("span", { class: "muted", text: "(not only the ones sent to it)" })),
+      h("p", { class: "form-error", role: "alert" }),
+      h("div", { class: "dlg-actions" }, h("button", { class: "btn primary", type: "submit" }, "▶ CHECK & ADD BOT")));
+    sync();
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const f = new FormData(form), btn = form.querySelector("button[type=submit]"), err = form.querySelector(".form-error");
+      btn.disabled = true; btn.textContent = "ASKING THE MODEL…"; err.textContent = "";
+      try {
+        const a = await api("api/agents", { name: f.get("name"), bot: { provider: f.get("provider"), url: f.get("url"), model: f.get("model"), key: f.get("key"), takes: f.get("any") ? "any" : "sent" } });
+        this.hatchFor = a.id;
+        const cv = h("canvas", { class: "egg-anim", width: 18, height: 18 });
+        cv.getContext("2d").drawImage(critterSprite("headphones", colorFor(a.id), { legs: 0, arms: 1 }), 1, 0);
+        fill($("#hatch-body"), cv, h("p", { class: "center", text: `${a.name.toUpperCase()} joined! ${f.get("model")} answered “${a.said}”. It's on the farm in a few seconds: send it work with --on ${a.id}.` }),
+          h("div", { class: "dlg-actions" }, h("button", { class: "btn primary", type: "button", onclick: () => $("#dlg-hatch").close() }, "▶ YAY")));
+        this.say(`${a.name.toUpperCase()} joined the farm!`); this.refresh();
+      } catch (x) { err.textContent = x.message; btn.disabled = false; btn.textContent = "▶ CHECK & ADD BOT"; }
+    });
+    fill($("#hatch-body"), form);
+    model.focus();
   },
   async beginLogin(id) {
     try { const s = await api(`api/agents/${id}/login`, {}); this.renderHatch(s); this.pollHatch(); }

@@ -22,6 +22,10 @@ Run the commands below with Bash; add `--json` to any of them for machine-readab
 - A sub-agent without `--on` runs on whichever Claude has budget free. That is how the farm saves budget: when your
   own account is low, start sub-agents without `--on` (or `--on <a Claude with less usage used>`) instead of doing big
   jobs in this conversation. Keep quick things in this conversation; don't spawn busywork.
+- A **bot** (marked `BOT on <model>` in `clodfarm agents`) is Claude Code on another model, a free or a local one: it
+  uses no Claude account's usage, but it is weaker than you. It takes only the sub-agents sent to it. Send it
+  well-specified, low-risk jobs (`clodfarm spawn ... --on <bot>`): a first draft, boilerplate, a search, a summary.
+  Check its result before you rely on it or tell your person it's done.
 
 ## Sub-agents (the person sees them on the farm)
 - `clodfarm spawn "<title>" --prompt "<full, self-contained instructions>" [--on <name>]` starts one. It works in its
@@ -133,9 +137,11 @@ def task_system_prompt(cfg, task: dict, cwd: str, branch: str | None, name: str 
     where = f"Your worktree is {cwd} on branch {branch}." if branch else f"Your working directory is {cwd}."
     reach = (f" Other Claudes reach you with `clodfarm msg {task['id']}`" +
              (f" or with SendMessage to the session '{name}'." if name else "."))
+    bot = (f" You run on {cfg.bot}, not on Claude: you are the farm's bot {cfg.name}. Your own sub-agents stay on you."
+           if cfg.bot else "")
     return (farm_guide() + f"\n## This run\nYou are a sub-agent of {task.get('owner') or cfg.name}: sub-agent "
             f"{task['id']} (depth {task.get('depth', 0)}, max depth {cfg.max_depth}). FARM_TASK_ID={task['id']}. {where}"
-            f"{reach}\n")
+            f"{reach}{bot}\n")
 
 
 def mail_text(msgs: list[dict], limit: int = 9000) -> str:
