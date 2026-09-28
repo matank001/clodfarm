@@ -361,7 +361,8 @@ def test_a_new_claude_measures_its_usage_at_once_and_reads_its_messages(env, mon
     try:
         snap = wait_for(lambda: farm.store.get_snapshot(farm.seat), timeout=30)
         assert abs(snap.five_hour.utilization - 0.42) < 1e-6  # no sub-agent ran: the usage keeper measured it
-        assert any(e["type"] == "usage.measured" for e in farm.store.events(time.time() - 60))
+        # the snapshot comes mid-run; the event is written once the measuring run has exited
+        wait_for(lambda: any(e["type"] == "usage.measured" for e in farm.store.events(time.time() - 60)), timeout=30)
         settings = json.load(open(env / "claude-home" / "settings.json"))
         for event in ("SessionStart", "UserPromptSubmit", "Stop", "SessionEnd"):
             assert "clodfarm hook" in json.dumps(settings["hooks"][event])
