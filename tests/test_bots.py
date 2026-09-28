@@ -163,6 +163,8 @@ def test_clodfarm_bot_add_checks_it_first(env, provider):
     assert "answered \"ok\"" in ok.stdout and "--on nightbot" in ok.stdout
     a = AgentManager(load()).get("nightbot")
     assert a["bot"]["takes"] == "any" and bots.load_key(a["config_dir"]) == "good"
+    assert not os.path.exists(os.path.join(str(env / "workspace"), ".farm", "agents", "nightbot.log")), \
+        "the command only registers it: the farm UI's process starts it, once"
 
 
 def test_the_farm_ui_adds_a_bot(env, backend, monkeypatch, provider):

@@ -178,9 +178,10 @@ class AgentManager:
     def get(self, aid: str) -> dict | None:
         return next((a for a in self.all() if a["id"] == aid), None)
 
-    def create(self, name: str, bot: dict | None = None, key: str = "") -> dict:
+    def create(self, name: str, bot: dict | None = None, key: str = "", start: bool = True) -> dict:
         """A new agent: a Claude that waits for its login, or with ``bot`` (checked settings, see bots.parse) a bot on
-        another model, whose API key is kept in its own config dir."""
+        another model, whose API key is kept in its own config dir. ``start=False`` only registers it: the farm UI's
+        process starts it (keep_alive), as it does for an agent registered from another process."""
         name = (name or "").strip()[:24] or ("Bot" if bot else "Claude")
         with self._lock:
             agents = self._load()
@@ -198,7 +199,8 @@ class AgentManager:
                 bots.save_key(d, key)
                 agent.update(bot=bot, hat="headphones")
             self._save(agents + [agent])
-        self.spawn(agent)
+        if start:
+            self.spawn(agent)
         return agent
 
     def farm_id(self, aid: str) -> str:

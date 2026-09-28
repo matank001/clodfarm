@@ -904,7 +904,8 @@ def cmd_bot(cfg, a):
     except ValueError as e:
         print(f"clodfarm: {e}", file=sys.stderr)
         return 1
-    agent = AgentManager(cfg).create(a.name, bot=bot, key=key)
+    # registered only: the farm UI's process starts it (a child of this command would outlive it, and run twice)
+    agent = AgentManager(cfg).create(a.name, bot=bot, key=key, start=False)
     _store(cfg).event("agent.added", f"{agent['id']} added: a bot on {bot['model']} via {bots.label(bot)}", by=cfg.name)
     print(f"bot {agent['id']} added: {bot['model']} via {bots.label(bot)} answered \"{said}\". The farm UI's process "
           f"starts it in a few seconds; send it work with `clodfarm spawn ... --on {agent['id']}`"
