@@ -38,6 +38,12 @@ log out there, or remove that profile, to take access back. Its DevTools and VNC
 listen on 127.0.0.1 inside the container only; the screen reaches you only through the farm UI, behind its
 password. Chromium runs with `--no-sandbox`: the container is its sandbox.
 
+The browser's proxy login (SET PROXY) is kept in `/workspace/.farm/browser-proxy.json`, readable by the farm's user
+only, and the UI never shows it again. The relay that adds the login listens on 127.0.0.1 in the container, so
+anything on that box (every Claude, too) could send traffic through your proxy plan. It answers only proxy requests,
+so a web page can't use it. The login travels to the proxy the way HTTP proxies take it: in the clear, as with any
+tool that uses that proxy.
+
 ## The optional apps role
 
 With [`deploy.sh apps-role`](deploy-aws.md#let-the-farm-build-apps-on-aws-optional) the agents can create real AWS

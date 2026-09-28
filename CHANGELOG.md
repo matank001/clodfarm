@@ -18,6 +18,14 @@
 - **What you ask your Claude to tell a running sub-agent is your instruction.** A `clodfarm msg <id>` from a
   conversation to one of its own Claude's sub-agents is shown to it as its person's instruction, not as another
   Claude's request; `--urgent` says so too. Messages from other Claudes and from sub-agents stay requests.
+- **A proxy for the farm's browser, from the country you pick.** A CONNECTION bar at the top of `/browser` sends
+  each profile DIRECT or VIA PROXY, and says what sites see. The farm has one proxy address: SET PROXY takes
+  `LOGIN:PASSWORD@HOST:PORT` (DataImpulse: `gw.dataimpulse.com`, a sticky port 10000–20000 for sites you're logged
+  in to), and each profile picks its own country (DataImpulse's `__cr.<country>`, added to the login for it). Every
+  switch is checked first and shows the exit IP and city. Chromium can't take a proxy login, so a relay on
+  127.0.0.1 adds it; a wrong login is an error on the page, never a login prompt the Claudes would get stuck on.
+  WebRTC can't go around the proxy, and a profile with the proxy on never falls back to going direct.
+  `FARM_BROWSER_PROXY` sets the address instead; `clodfarm browser proxy on|off [PROFILE] [--country us]`.
 
 ## 0.8.0 (2026-09-27)
 

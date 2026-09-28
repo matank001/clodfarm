@@ -322,3 +322,260 @@ def test_the_cli(env, monkeypatch, capsys):
     assert cli.main(["browser", "open", "x.com", "--profile", "work"]) == 1  # it's off
     assert cli.main(["browser", "remove", "work"]) == 0
     assert cli.main(["browser", "remove", "work"]) == 1  # gone already
+
+
+# ------------------------------------------------------------------ the proxy
+def test_a_proxy_is_written_the_ways_providers_write_it():
+    di = {"host": "gw.dataimpulse.com", "port": 823, "user": "abc123", "password": "s3cret"}
+    for text in ("abc123:s3cret@gw.dataimpulse.com:823", "http://abc123:s3cret@gw.dataimpulse.com:823/",
+                 "gw.dataimpulse.com:823:abc123:s3cret", "  HTTP://abc123:s3cret@gw.dataimpulse.com:823\n"):
+        assert browser.parse_proxy(text) == di
+    assert browser.parse_proxy("abc__cr.us;sessid.7:p%40ss@74.81.81.81:10000") == \
+        {"host": "74.81.81.81", "port": 10000, "user": "abc__cr.us;sessid.7", "password": "p@ss"}
+    assert browser.parse_proxy("a:p@ss@gw.dataimpulse.com:823")["password"] == "p@ss"  # an @ in the password
+    assert browser.parse_proxy("gw.dataimpulse.com:823")["user"] == ""  # IP-whitelisted: no login
+    for bad in ("socks5://a:b@gw.dataimpulse.com:824", "gw.dataimpulse.com", "a:b@gw.dataimpulse.com:99999",
+                "a:b@-bad-:823", "", "a b:c@h.com:1"):
+        with pytest.raises(ValueError):
+            browser.parse_proxy(bad)
+
+
+@pytest.fixture
+def upstream():
+    """A stand-in for the proxy provider: it wants the login `u:p`, records each request's head, answers CONNECT
+    with 200 and then echoes, and a plain request with a small keep-alive response."""
+    srv = socket.socket()
+    srv.bind(("127.0.0.1", 0))
+    srv.listen(8)
+    heads = []
+
+    def serve():
+        while True:
+            try:
+                c, _ = srv.accept()
+            except OSError:
+                return
+            threading.Thread(target=one, args=(c,), daemon=True).start()
+
+    def one(c):
+        with c:
+            head, _ = browser._head(c)
+            heads.append(head.decode())
+            if f"Basic {base64.b64encode(b'u:p').decode()}" not in head.decode():
+                return c.sendall(b"HTTP/1.1 407 Proxy Authentication Required\r\n"
+                                 b"Proxy-Authenticate: Basic realm=\"x\"\r\nContent-Length: 0\r\n\r\n")
+            if head.startswith(b"CONNECT"):
+                c.sendall(b"HTTP/1.1 200 Connection established\r\n\r\n")
+                while data := c.recv(65536):
+                    c.sendall(data)
+            else:
+                c.sendall(b"HTTP/1.1 200 OK\r\nConnection: keep-alive\r\nContent-Length: 2\r\n\r\nhi")
+    threading.Thread(target=serve, daemon=True).start()
+    yield {"host": "127.0.0.1", "port": srv.getsockname()[1], "user": "u", "password": "p"}, heads
+    srv.close()
+
+
+def ask(relay, request: bytes) -> tuple[socket.socket, bytes]:
+    s = socket.create_connection(("127.0.0.1", relay.port), timeout=5)
+    s.sendall(request)
+    head, rest = browser._head(s)
+    return s, head + rest
+
+
+def test_the_relay_logs_in_for_chromium(upstream):
+    up, heads = upstream
+    relay = browser.Relay(up)
+    try:
+        s, got = ask(relay, b"CONNECT linkedin.com:443 HTTP/1.1\r\nHost: linkedin.com:443\r\n"
+                            b"Proxy-Authorization: Basic Y2hyb21pdW06Z3Vlc3M=\r\nProxy-Connection: keep-alive\r\n\r\n")
+        assert got.startswith(b"HTTP/1.1 200")
+        s.sendall(b"\x16\x03\x01 a TLS hello")
+        assert s.recv(100) == b"\x16\x03\x01 a TLS hello"  # the tunnel is a straight pipe
+        s.close()
+        h = heads[-1]
+        assert h.startswith("CONNECT linkedin.com:443 HTTP/1.1\r\n") and h.count("Proxy-Authorization") == 1
+        assert "Y2hyb21pdW06Z3Vlc3M=" not in h and "Proxy-Connection" not in h  # Chromium's own are dropped
+
+        s, got = ask(relay, b"GET http://example.com/ HTTP/1.1\r\nHost: example.com\r\n"
+                            b"Proxy-Connection: keep-alive\r\n\r\n")
+        s.close()
+        assert got.startswith(b"HTTP/1.1 200 OK") and b"Connection: close" in got and b"keep-alive" not in got
+        assert "Connection: close" in heads[-1] and "keep-alive" not in heads[-1]  # one request per connection
+        assert not relay.error
+
+        s, got = ask(relay, b"GET / HTTP/1.1\r\nHost: 127.0.0.1\r\n\r\n")  # a page calling the relay directly
+        s.close()
+        assert got.startswith(b"HTTP/1.1 400") and len(heads) == 2
+    finally:
+        relay.close()
+
+
+def test_a_wrong_login_is_the_farm_s_error_not_chromium_s_prompt(upstream):
+    up, _ = upstream
+    relay = browser.Relay({**up, "password": "wrong"})
+    try:
+        s, got = ask(relay, b"CONNECT linkedin.com:443 HTTP/1.1\r\nHost: linkedin.com:443\r\n\r\n")
+        s.close()
+        assert got.startswith(b"HTTP/1.1 502") and b"Proxy-Authenticate" not in got
+        assert "refused its login" in relay.error
+        with pytest.raises(ValueError, match="refused the login"):
+            browser.check_proxy({**up, "password": "wrong"})
+    finally:
+        relay.close()
+    free = socket.socket()
+    free.bind(("127.0.0.1", 0))
+    port = free.getsockname()[1]
+    free.close()
+    with pytest.raises(ValueError, match="can't reach"):
+        browser.check_proxy({**up, "port": port}, timeout=2)
+
+
+def test_turning_the_proxy_on_restarts_chromium_through_the_relay(tmp_path, monkeypatch, upstream):
+    up, _ = upstream
+    monkeypatch.setattr(browser, "available", lambda: True)
+    monkeypatch.setattr(browser.Browser, "_wait", staticmethod(lambda *a: None))
+    b = browser.Browser("default", 0, str(tmp_path / "profile"), str(tmp_path / "browser.log"))
+    started = []
+    real_cmd = b._cmd
+
+    def cmd(name):
+        started.append((name, real_cmd(name) if name == "chromium" else []))
+        return ["sleep", "30"]
+    monkeypatch.setattr(b, "_cmd", cmd)
+    try:
+        b.sync(True)
+        assert [n for n, _ in started] == ["xvfb", "vnc", "chromium"] and b.relay is None
+        assert not any(a.startswith("--proxy-server") for a in started[-1][1])
+        b.sync(True)
+        assert len(started) == 3  # nothing changed, nothing restarts
+        b.sync(True, up)
+        assert [n for n, _ in started[3:]] == ["chromium"] and b.relay and b.relay.upstream == up
+        assert f"--proxy-server=http://127.0.0.1:{b.relay.port}" in started[-1][1]
+        assert "--force-webrtc-ip-handling-policy=disable_non_proxied_udp" in started[-1][1]
+        relay = b.relay
+        b.sync(True)  # off again: a restart without it
+        assert [n for n, _ in started[4:]] == ["chromium"] and b.relay is None and relay.closed.is_set()
+    finally:
+        b.shutdown()
+    assert not b.procs and b.relay is None
+
+
+def test_a_country_goes_in_a_dataimpulse_login():
+    di = browser.parse_proxy("abc:pw@gw.dataimpulse.com:10000")
+    assert browser.countries(di) and browser.with_country(di, "us")["user"] == "abc__cr.us"
+    assert browser.with_country({**di, "user": "abc__cr.de;sessttl.60"}, "us")["user"] == "abc__cr.us;sessttl.60"
+    assert browser.with_country(di, "") == di  # any country: the login as it was given
+    assert browser.with_country(di, "us")["password"] == "pw" and di["user"] == "abc"  # a copy
+    other = browser.parse_proxy("abc:pw@proxy.example.com:8080")
+    assert not browser.countries(other) and browser.with_country(other, "us") == other
+    assert not browser.countries(browser.parse_proxy("gw.dataimpulse.com:10000"))  # whitelisted: no login for it
+    assert browser.country_code(" US ") == "us"
+    for bad in ("usa", "u", "1a"):
+        with pytest.raises(ValueError):
+            browser.country_code(bad)
+
+
+def seen(ip="203.0.113.7", country="us"):
+    return {"ip": ip, "country": country, "city": "Ashburn"}
+
+
+def test_a_profile_through_the_proxy_never_goes_out_direct(tmp_path, monkeypatch):
+    checked = []
+    monkeypatch.setattr(browser, "check_proxy", lambda p: checked.append(p) or seen())
+    bs = browser.Browsers(str(tmp_path))
+    with pytest.raises(ValueError, match="no proxy"):
+        bs.proxy("default", True)
+    browser.save_proxy(str(tmp_path), browser.parse_proxy("u:p@gw.dataimpulse.com:823"))
+    assert oct(os.stat(browser._proxy_path(str(tmp_path))).st_mode & 0o777) == "0o600"
+    assert bs.proxy("default", True, by="test") == (True, seen()) and checked[-1]["user"] == "u"
+    assert bs.proxy("default", True)[0] is False  # already on
+    assert bs.proxy("default", True, country="us")[0] and checked[-1]["user"] == "u__cr.us"  # checked from there
+    assert bs.proxy("default", True)[0] is False and checked[-1]["user"] == "u__cr.us"  # it keeps its country
+    bs.want("default", True)
+    synced = []
+    monkeypatch.setattr(browser.Browser, "sync", lambda self, on, proxy=None: synced.append((on, proxy)))
+    bs.sync()
+    assert synced[-1] == (True, {"host": "gw.dataimpulse.com", "port": 823, "user": "u__cr.us", "password": "p"})
+    browser.save_proxy(str(tmp_path), None)  # the proxy went away: the profile stops, it doesn't go direct
+    bs.sync()
+    assert synced[-1] == (False, None) and "no proxy" in bs.status()["profiles"][0]["error"]
+    monkeypatch.setenv(browser.PROXY_ENV, "http://envuser:envpw@gw.dataimpulse.com:10000")
+    bs.sync()
+    assert synced[-1] == (True, {"host": "gw.dataimpulse.com", "port": 10000, "user": "envuser__cr.us",
+                                 "password": "envpw", "from_env": True})
+    st = bs.status()
+    assert st["proxy"] == {"set": True, "server": "gw.dataimpulse.com:10000", "login": True, "from_env": True,
+                           "countries": True}
+    p = st["profiles"][0]
+    assert p["proxy"] and p["country"] == "us" and p["proxy_seen"]["ip"] == "203.0.113.7"
+    assert "envpw" not in json.dumps(st)
+    monkeypatch.setenv(browser.PROXY_ENV, "u:p@proxy.example.com:8080")  # not DataImpulse: no country to choose
+    with pytest.raises(ValueError, match="DataImpulse"):
+        bs.proxy("default", True, country="de")
+    assert bs.status()["profiles"][0]["country"] == ""
+    assert bs.proxy("default", False) == (True, None) and not bs.status()["profiles"][0]["proxy_seen"]
+
+
+def test_the_proxy_from_the_ui(farm, monkeypatch):
+    host, ui = farm
+    base, call = f"http://{host}", client()
+    login(call, base)
+    monkeypatch.setattr(ui.browsers, "sync", lambda: None)
+    code, body, _ = call(base + "/api/browser/proxy", {"profile": "default", "on": True})
+    assert code == 400 and "no proxy" in body["error"]
+    checked = []
+    monkeypatch.setattr(browser, "check_proxy", lambda p: checked.append(p) or seen())
+    assert call(base + "/api/browser/proxy/address", {"address": "socks5://a:b@gw.dataimpulse.com:824"})[0] == 400
+    code, _, _ = call(base + "/api/browser/proxy/address", {"address": "abc:s3cret@gw.dataimpulse.com:823",
+                                                            "profile": "nope"})
+    assert code == 400 and not checked and browser.load_proxy(ui.cfg.workspace) is None  # nothing kept
+    code, st, _ = call(base + "/api/browser/proxy/address", {"address": "abc:s3cret@gw.dataimpulse.com:823"})
+    assert code == 200 and st["seen"] == seen() and checked[-1]["password"] == "s3cret"
+    assert st["proxy"] == {"set": True, "server": "gw.dataimpulse.com:823", "login": True, "from_env": False,
+                           "countries": True}
+    assert "s3cret" not in json.dumps(st) and "s3cret" not in json.dumps(call(base + "/api/browser")[1])
+    assert not st["profiles"][0]["proxy"]  # no profile given: none turned on
+    code, st, _ = call(base + "/api/browser/proxy", {"profile": "default", "on": True})
+    assert code == 200 and st["profiles"][0]["proxy"] and ui.browsers.registry.get("default")["proxy"]
+    code, st, _ = call(base + "/api/browser/proxy", {"profile": "default", "on": True, "country": "de"})
+    assert code == 200 and st["profiles"][0]["country"] == "de" and checked[-1]["user"] == "abc__cr.de"
+    assert st["profiles"][0]["proxy_seen"]["ip"] == "203.0.113.7" and st["seen"]["city"] == "Ashburn"
+    assert call(base + "/api/browser/proxy", {"profile": "default", "on": True, "country": "germany"})[0] == 400
+    ui.browsers.registry.add("work")
+    ui.browsers.registry.proxy("work", False, country="fr")
+    code, st, _ = call(base + "/api/browser/proxy/address", {"address": "abc:s3cret@gw.dataimpulse.com:10000",
+                                                             "profile": "work"})
+    assert code == 200 and st["profiles"][1]["proxy"]  # set from a profile: that profile goes through it
+    assert checked[-1]["user"] == "abc__cr.fr"  # from its country
+    events = [e["msg"] for e in ui.store.events(0, 50) if e["type"] == "browser.proxy"]
+    assert any("(203.0.113.7, US)" in t for t in events)
+    monkeypatch.setattr(browser, "check_proxy", lambda p: (_ for _ in ()).throw(ValueError("the proxy refused the login")))
+    code, body, _ = call(base + "/api/browser/proxy/address", {"address": "abc:wrong@gw.dataimpulse.com:823"})
+    assert code == 400 and "refused" in body["error"]
+    assert browser.load_proxy(ui.cfg.workspace)["password"] == "s3cret"  # a failed check keeps the old one
+    code, body, _ = call(base + "/api/browser/proxy", {"profile": "default", "on": True, "country": "it"})
+    assert code == 400 and ui.browsers.registry.get("default")["country"] == "de"  # a failed check changes nothing
+    code, st, _ = call(base + "/api/browser/proxy", {"profile": "default", "on": False})
+    assert code == 200 and not st["profiles"][0]["proxy"]  # going direct needs no check
+    code, st, _ = call(base + "/api/browser/proxy/address", {"address": ""})
+    assert code == 200 and st["proxy"] == {"set": False} and browser.load_proxy(ui.cfg.workspace) is None
+    monkeypatch.setenv(browser.PROXY_ENV, "u:p@gw.dataimpulse.com:823")
+    code, body, _ = call(base + "/api/browser/proxy/address", {"address": "abc:s3cret@gw.dataimpulse.com:823"})
+    assert code == 400 and browser.PROXY_ENV in body["error"]
+
+
+def test_the_proxy_from_the_cli(env, monkeypatch, capsys):
+    from clodfarm import cli
+    monkeypatch.setenv("FARM_BROWSER_BIN", "no-such-chromium")
+    monkeypatch.setattr(browser, "check_proxy", lambda p: seen(country="gb"))
+    assert cli.main(["browser", "proxy", "on"]) == 1
+    assert "no proxy" in capsys.readouterr().err
+    browser.save_proxy(os.environ["FARM_WORKSPACE"], browser.parse_proxy("u:p@gw.dataimpulse.com:823"))
+    assert cli.main(["browser", "proxy", "on", "--country", "gb"]) == 0
+    assert "through the proxy (the web sees 203.0.113.7, GB)" in capsys.readouterr().out
+    monkeypatch.setattr(browser, "missing", lambda: [])  # as in the image
+    assert cli.main(["browser"]) == 0
+    out = capsys.readouterr().out
+    assert "via the proxy from GB" in out and "proxy: gw.dataimpulse.com:823" in out and ":p@" not in out
+    assert cli.main(["browser", "proxy", "off", "default"]) == 0
+    assert cli.main(["browser", "proxy", "on", "nope"]) == 1
