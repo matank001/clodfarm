@@ -810,12 +810,19 @@ def make_handler(ui: FarmUI):
     return Handler
 
 
+class FarmHTTPServer(ThreadingHTTPServer):
+    """The farm UI's server. A page opens many connections at once (the browser page's noVNC is ~55 modules, and a
+    proxy in front opens one upstream connection per request): with socketserver's backlog of 5, Linux drops the
+    rest, the proxy answers 502 and the page's script never runs."""
+    request_queue_size = 256
+    daemon_threads = True
+
+
 def serve(cfg, store: Store | None = None, manager: AgentManager | None = None, block: bool = True):
     """Start the UI (and keep the added agents running). Returns the server when ``block`` is False."""
     ui = FarmUI(cfg, store, manager)
     host, port = os.environ.get("FARM_UI_HOST", "0.0.0.0"), int(os.environ.get("FARM_UI_PORT", "8080"))
-    httpd = ThreadingHTTPServer((host, port), make_handler(ui))
-    httpd.daemon_threads = True
+    httpd = FarmHTTPServer((host, port), make_handler(ui))
     httpd.ui = ui
     threading.Thread(target=ui.manager.keep_alive, name="agents", daemon=True).start()
     threading.Thread(target=ui.browsers.keep, args=(ui.stopping,), name="browser", daemon=True).start()

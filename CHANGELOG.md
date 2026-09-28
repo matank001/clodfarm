@@ -5,6 +5,11 @@
 Bots on other models, a proxy for the farm's browser, a Claude you can talk to while its sub-agents work, and a
 cancel that stops them.
 
+- **The farm's browser page no longer comes up blank behind a proxy.** The page loads noVNC's ~55 modules at
+  once, and a proxy in front (like clod.farm's) opens a connection for each: the UI server's listen backlog of 5 made
+  Linux drop most of them, the proxy answered 502, and a module that fails to load stops the whole page (no profiles,
+  no buttons, "…" at the top). The server now queues 256 connections, and the page loads noVNC only when it shows a
+  screen, so its controls work even if the screen can't load (it then says to reload).
 - **Bots: other models on the farm** (#9). A bot is Claude Code on another model, through any provider that speaks
   Anthropic's API: OpenRouter's free models, a local Ollama, a LiteLLM gateway. Add one in the farm UI (+ NEW CLAUDE,
   BOT: OTHER MODEL) or with `clodfarm bot add`: the farm asks the model for one word first and keeps the bot only if

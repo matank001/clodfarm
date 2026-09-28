@@ -4,7 +4,12 @@
  * profile DIRECT or VIA PROXY (the farm's one proxy, from a country the profile picks), checked before it's used.
  * Paste goes through the page's paste event (no clipboard permission needed) and what you copy there comes back
  * to your clipboard. On a Mac, ⌘ shortcuts (⌘A, ⌘C, ⌘L, ...) become Ctrl in the farm's Linux Chromium. */
-import RFB from "./browser/novnc/core/rfb.js";
+// noVNC is loaded when a screen is first shown, not with the page: if one of its ~55 modules can't load, the profiles,
+// START and CONNECTION still work, and the screen says what happened
+let RFB = null, rfbLoad = null, rfbFailed = false;
+const loadRFB = () => (rfbLoad = rfbLoad || import("./browser/novnc/core/rfb.js").then(m => (RFB = m.default),
+  e => { rfbFailed = true; throw e; }));
+const NO_SCREEN = "THE SCREEN DIDN'T LOAD (THE FARM WAS BUSY). RELOAD THE PAGE.";
 
 const BASE = document.body.dataset.base || "";
 const $ = s => document.querySelector(s);
@@ -58,6 +63,12 @@ const current = () => (st && st.profiles.find(p => p.name === sel)) || null;
 // ---------------------------------------------------------------- the screen
 function connect(name) {
   if (rfb && rfbFor === name) return;
+  if (!RFB) { // the screen's code first (once); a module that failed to load stays failed until a reload
+    if (rfbFailed) return message(NO_SCREEN);
+    message("LOADING THE SCREEN…");
+    loadRFB().then(() => { if (sel === name && current()?.ready) connect(name); }, () => message(NO_SCREEN));
+    return;
+  }
   disconnect();
   message("CONNECTING…");
   const url = `${location.protocol === "https:" ? "wss" : "ws"}://${location.host}${BASE}/api/browser/screen?profile=${encodeURIComponent(name)}`;

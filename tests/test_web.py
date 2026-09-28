@@ -287,3 +287,43 @@ def test_a_new_password_works_at_once_and_signs_old_sessions_out(env, backend, m
     finally:
         srv.shutdown()
         farm_ui.manager.shutdown()
+
+
+def test_a_burst_of_connections_is_served(env, backend, monkeypatch):
+    """The browser page loads ~55 noVNC modules at once, and a proxy in front opens one connection for each: with
+    socketserver's backlog of 5, Linux drops the rest, the proxy answers 502 and the page stays blank."""
+    if backend != "sqlite":
+        pytest.skip("one backend is enough")
+    import socket
+    from clodfarm.web import FarmHTTPServer, serve
+    monkeypatch.setenv("FARM_UI_PASSWORD", "correct horse")
+    monkeypatch.setenv("FARM_UI_HOST", "127.0.0.1")
+    monkeypatch.setenv("FARM_UI_PORT", "0")
+    httpd = serve(load(), block=False)
+    try:
+        assert isinstance(httpd, FarmHTTPServer)
+        port, got, go = httpd.server_address[1], [], threading.Event()
+
+        def one():
+            go.wait()
+            try:
+                s = socket.create_connection(("127.0.0.1", port), timeout=1.0)  # a proxy's connect timeout
+                s.settimeout(15)
+                s.sendall(b"GET /favicon.svg HTTP/1.1\r\nHost: x\r\nConnection: close\r\n\r\n")
+                data = b""
+                while chunk := s.recv(65536):
+                    data += chunk
+                got.append(data.split(b" ", 2)[1].decode() if data.startswith(b"HTTP/") else "empty")
+            except OSError as e:
+                got.append(type(e).__name__)
+        ts = [threading.Thread(target=one) for _ in range(60)]
+        for t in ts:
+            t.start()
+        go.set()
+        for t in ts:
+            t.join()
+        assert got == ["200"] * 60, sorted(set(got))
+    finally:
+        httpd.shutdown()
+        httpd.ui.stopping.set()
+        httpd.ui.manager.shutdown()
