@@ -138,6 +138,121 @@ def test_the_cli(ui, env):
     assert run("disconnect").returncode == 0 and "not connected" in run().stdout
 
 
+# --------------------------------------------------------------------- Blender
+BLENDER_TOKEN = "bl-" + "d" * 30
+
+
+class FakeBlenderMCP(BaseHTTPRequestHandler):
+    """An MCP server's initialize, answered as an SSE stream the way the Python SDK does."""
+    def log_message(self, *a):
+        pass
+
+    def do_POST(self):
+        self.rfile.read(int(self.headers.get("Content-Length") or 0))
+        if self.path != "/mcp":
+            return self._send(404, b"not found", "text/plain")
+        if self.headers.get("Authorization") != f"Bearer {BLENDER_TOKEN}":
+            return self._send(401, b'{"error": "unauthorized"}', "application/json")
+        msg = {"jsonrpc": "2.0", "id": 1, "result": {"protocolVersion": "2025-06-18", "capabilities": {"tools": {}},
+                                                     "serverInfo": {"name": "blender", "title": "Blender 5.2",
+                                                                    "version": "1.0.0"}}}
+        self._send(200, f"event: message\ndata: {json.dumps(msg)}\n\n".encode(), "text/event-stream")
+
+    def _send(self, code, data, ctype):
+        self.send_response(code)
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+
+@pytest.fixture
+def blender_mcp():
+    srv = ThreadingHTTPServer(("127.0.0.1", 0), FakeBlenderMCP)
+    threading.Thread(target=srv.serve_forever, daemon=True).start()
+    yield f"http://127.0.0.1:{srv.server_address[1]}/mcp"
+    srv.shutdown()
+
+
+def test_the_manager_connects_blender_and_every_claude_gets_it(ui, env, blender_mcp):
+    import subprocess
+    import sys
+    base, farm_ui = ui
+    gil = farm_ui.manager.create("gil", start=False)
+    run = lambda *a, stdin=None: subprocess.run([sys.executable, "-m", "clodfarm", "blender", *a], input=stdin,  # noqa
+                                                capture_output=True, text=True,
+                                                env={k: v for k, v in os.environ.items() if k != "CLAUDECODE"})
+    assert "not connected" in run().stdout
+    r = run("connect", blender_mcp, stdin="wrong\n")
+    assert r.returncode == 1 and "refused the token" in r.stderr
+    r = run("connect", blender_mcp.replace("/mcp", "/nope"), stdin=BLENDER_TOKEN + "\n")
+    assert r.returncode == 1 and "HTTP 404" in r.stderr
+    r = run("connect", blender_mcp, stdin=BLENDER_TOKEN + "\n")
+    assert r.returncode == 0, r.stderr
+    assert "Blender 5.2" in r.stdout and "…dddd" in r.stdout and BLENDER_TOKEN not in r.stdout
+    assert oct(os.stat(connectors._blender_path(farm_ui.cfg.workspace)).st_mode & 0o777) == "0o600"
+    # every Claude: the MCP server, and the guide says it's there
+    gil_json = os.path.join(gil["config_dir"], ".claude.json")
+    assert servers(gil_json)["blender"] == {"type": "http", "url": blender_mcp, "headers": {
+        "Authorization": f"Bearer {BLENDER_TOKEN}", "X-Clodfarm-Connector": "blender"}}
+    assert "## Blender (a connector)" in open(os.path.join(gil["config_dir"], "CLAUDE.md")).read()
+    # disconnect: the tools go
+    assert run("disconnect").returncode == 0 and "not connected" in run().stdout
+    assert "blender" not in servers(gil_json)
+    assert "## Blender (a connector)" not in open(os.path.join(gil["config_dir"], "CLAUDE.md")).read()
+
+
+def test_the_manager_connects_blender_from_the_ui(ui, blender_mcp):
+    base, farm_ui = ui
+    gil = farm_ui.manager.create("gil", start=False)
+    manager, person = client(), client()
+    login(manager, base)
+    login(person, base, claude=gil["id"])
+    assert person(base + "/api/connectors")[1]["blender"] == {"connected": False}
+    assert person(base + "/api/connectors/blender", {"url": blender_mcp, "token": BLENDER_TOKEN})[0] == 403
+    code, body, _ = manager(base + "/api/connectors/blender", {"url": blender_mcp, "token": "wrong"})
+    assert code == 400 and "refused the token" in body["error"]
+    code, body, _ = manager(base + "/api/connectors/blender", {"url": "ftp://nope"})
+    assert code == 400 and "MCP server URL" in body["error"]
+    code, body, _ = manager(base + "/api/connectors/blender", {"url": blender_mcp, "token": BLENDER_TOKEN})
+    assert code == 200, body
+    b = body["blender"]
+    assert b["connected"] and b["url"] == blender_mcp and b["last4"] == "dddd" and b["server"]["title"] == "Blender 5.2"
+    assert BLENDER_TOKEN not in json.dumps(body), "the token is never shown again"
+    assert servers(os.path.join(gil["config_dir"], ".claude.json"))["blender"]["url"] == blender_mcp
+    import time
+    time.sleep(1.05)  # the state is built once a second
+    assert person(base + "/api/state")[1]["connectors"]["blender"] is True
+    seen = person(base + "/api/connectors")[1]["blender"]
+    assert seen == {"connected": True, "server": b["server"], "tools": "mcp__blender__*"}, "not where it runs"
+    assert not any(blender_mcp in (e.get("msg") or "") for e in person(base + "/api/state")[1]["events"])
+    assert manager(base + "/api/connectors/blender/disconnect", {})[1]["blender"] == {"connected": False}
+    assert "blender" not in servers(os.path.join(gil["config_dir"], ".claude.json"))
+
+
+def test_a_claude_cant_connect_blender(env, blender_mcp):
+    import subprocess
+    import sys
+    r = subprocess.run([sys.executable, "-m", "clodfarm", "blender", "connect", blender_mcp], input=BLENDER_TOKEN,
+                       capture_output=True, text=True, env={**os.environ, "CLAUDECODE": "1"})
+    assert r.returncode == 2 and "farm manager" in r.stderr
+
+
+def test_a_hand_made_blender_server_is_kept(env, tmp_path):
+    path = auth.claude_json_path()
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    mine = {"type": "http", "url": "http://127.0.0.1:9999/mcp"}
+    json.dump({"mcpServers": {"blender": mine}}, open(path, "w"))
+    auth.install_browser_mcp()
+    assert servers(path)["blender"] == mine, "not ours (no marker): left alone"
+
+
+def test_a_person_can_turn_blender_off_for_their_claude():
+    assert not policy.decide({"deny": ["blender"]}, "mcp__blender__execute_python")[0]
+    assert policy.decide({"deny": ["mcp"]}, "mcp__blender__execute_python")[0], "Blender is its own group"
+    assert policy.decide({"deny": ["blender"]}, "mcp__stripe__list_customers")[0]
+
+
 # ------------------------------------------------------------------ Google Ads
 GADS = {"developer_token": "devtok_abcd1234", "client_id": "123.apps.googleusercontent.com",
         "client_secret": "GOCSPX-secret", "refresh_token": "good", "login_customer_id": "123-456-7890"}

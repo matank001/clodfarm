@@ -1639,6 +1639,8 @@ const EVENT_TEXT = {
   "agent.removed": (e) => `${e.msg.split(" ")[0].toUpperCase()} left the farm.`,
   "connector.stripe": (e) => /disconnected/.test(e.msg) ? "Stripe is disconnected: the Claudes' Stripe tools are gone."
     : `The farm is on Stripe${/\(live mode/.test(e.msg) ? " in LIVE MODE" : /\(test mode/.test(e.msg) ? " (test mode)" : ""}: every Claude can use it now.`,
+  "connector.blender": (e) => /disconnected/.test(e.msg) ? "Blender is disconnected: the Claudes' Blender tools are gone."
+    : "The farm is connected to Blender: every Claude can use it now.",
 };
 
 /** Who this browser is, from /api/state's `me` (fresh every poll) and /api/me (hatching, every 30s). */
@@ -2339,16 +2341,16 @@ const UI = {
     const home = R.manager ? $("#grp-run") : $("#grp-farm");
     if (b.parentElement !== home) { if (R.manager) home.insertBefore(b, $("#manager-tool")); else home.append(b); }
     const slack = st.slack?.state, bad = slack === "error";
-    const n = (slack === "live" ? 1 : 0) + (st.connectors?.stripe ? 1 : 0) + (st.connectors?.google_ads ? 1 : 0);
+    const n = (slack === "live" ? 1 : 0) + (st.connectors?.stripe ? 1 : 0) + (st.connectors?.blender ? 1 : 0) + (st.connectors?.google_ads ? 1 : 0);
     const badge = $("#conn-badge");
     badge.hidden = !n && !bad;
     badge.textContent = n ? String(n) : "!";
     badge.classList.toggle("bad", !n && bad);
-    b.dataset.desc = R.manager ? "Plug the farm into Slack, Stripe and Google Ads" : "What the farm is plugged into";
-    b.dataset.help = (R.manager ? "Plug the farm in: Slack gives it work, Stripe and Google Ads go to every Claude." : "What the farm is plugged into: Slack, Stripe, Google Ads.")
+    b.dataset.desc = R.manager ? "Plug the farm into Slack, Stripe, Blender and Google Ads" : "What the farm is plugged into";
+    b.dataset.help = (R.manager ? "Plug the farm in: Slack gives it work, Stripe, Blender and Google Ads go to every Claude." : "What the farm is plugged into: Slack, Stripe, Blender, Google Ads.")
       + " The green number: how many are on.";
     b.dataset.tip = n ? `Connectors · ${n} on` : bad ? "Connectors · Slack needs a look" : "Connectors";
-    b.setAttribute("aria-label", `Connectors: Slack, Stripe and Google Ads, ${n ? n + " connected" : bad ? "Slack needs a look" : "none connected"} (S)`);
+    b.setAttribute("aria-label", `Connectors: Slack, Stripe, Blender and Google Ads, ${n ? n + " connected" : bad ? "Slack needs a look" : "none connected"} (S)`);
     if ($("#dlg-conn-menu").open) this.renderConnMenu();
   },
   async loadConnectors() {
@@ -2365,10 +2367,13 @@ const UI = {
     const who = sp.account?.name || (sp.kind === "restricted" ? "restricted key" : "");
     const stripe = !sp.connected ? ["off", "NOT CONNECTED"] : sp.mode === "live" ? ["live", `LIVE MODE${who ? " · " + who.toUpperCase() : ""}`]
       : sp.mode ? ["on", `CONNECTED · TEST MODE${who ? " · " + who.toUpperCase() : ""}`] : ["on", "CONNECTED"];
+    const bon = !!st.connectors?.blender, bl = c.blender && !!c.blender.connected === bon ? c.blender : { connected: bon };
+    const bname = bl.server?.title || bl.server?.name || "";
+    const blender = !bl.connected ? ["off", "NOT CONNECTED"] : ["on", `CONNECTED${bname ? " · " + bname.toUpperCase() : ""}`];
     const gon = !!st.connectors?.google_ads, ga = c.google_ads && !!c.google_ads.connected === gon ? c.google_ads : { connected: gon };
     const nAds = (ga.customers || []).filter(x => !x.manager).length;
     const gads = !ga.connected ? ["off", "NOT CONNECTED"] : ["on", ga.customers ? `CONNECTED · ${nAds} AD ACCOUNT${nAds === 1 ? "" : "S"}` : "CONNECTED"];
-    return { slack: { pill: slack, ...sl }, stripe: { pill: stripe, ...sp }, gads: { pill: gads, ...ga } };
+    return { slack: { pill: slack, ...sl }, stripe: { pill: stripe, ...sp }, blender: { pill: blender, ...bl }, gads: { pill: gads, ...ga } };
   },
   openConnMenu() {
     const d = $("#dlg-conn-menu");
@@ -2395,7 +2400,7 @@ const UI = {
   },
   renderConnMenu() {
     const R = role(), v = this.connView(), list = $("#connm-list");
-    const sig = JSON.stringify([R.manager, v.slack.pill, v.stripe.pill, v.gads.pill]);
+    const sig = JSON.stringify([R.manager, v.slack.pill, v.stripe.pill, v.blender.pill, v.gads.pill]);
     if (list.dataset.sig === sig) return;
     list.dataset.sig = sig;
     const at = [...list.children].indexOf(document.activeElement);
@@ -2408,6 +2413,7 @@ const UI = {
     fill(list,
       row("slack", "slack.svg", "SLACK", "Give the farm work from Slack", v.slack.pill, () => R.manager ? this.openSlack() : this.openConnector("slack")),
       row("stripe", "stripe.svg", "STRIPE", "Every Claude can use your Stripe account", v.stripe.pill, () => this.openConnector("stripe")),
+      row("blender", "blender.svg", "BLENDER", "Every Claude can drive a Blender on another machine", v.blender.pill, () => this.openConnector("blender")),
       row("gads", "google-ads.svg", "GOOGLE ADS", "Reports and live dashboards of your ad accounts", v.gads.pill, () => this.openConnector("gads")));
     if (at >= 0) list.children[at]?.focus({ preventScroll: true });
     $("#connm-foot").textContent = R.manager ? "MORE CONNECTORS COMING" : "THE FARM'S MANAGER CONNECTS THESE";
@@ -2424,9 +2430,9 @@ const UI = {
   /** A connector's panel: Stripe (the manager connects it; people see how it stands), or Slack for a person. */
   async openConnector(id) {
     for (const x of $$("dialog[open]")) x.close();
-    this.connPanel = id; this.stripeReplace = false; this.gadsReplace = false;
-    $("#connector-logo").src = { slack: "slack.svg", gads: "google-ads.svg" }[id] || "stripe.svg";
-    $("#connector-h").textContent = { slack: "SLACK", gads: "GOOGLE ADS" }[id] || "STRIPE";
+    this.connPanel = id; this.stripeReplace = false; this.gadsReplace = false; this.blenderReplace = false;
+    $("#connector-logo").src = { slack: "slack.svg", gads: "google-ads.svg", blender: "blender.svg" }[id] || "stripe.svg";
+    $("#connector-h").textContent = { slack: "SLACK", gads: "GOOGLE ADS", blender: "BLENDER" }[id] || "STRIPE";
     const body = $("#connector-body");
     body.dataset.key = "";
     if (this.conn) this.renderConnector(); else fill(body, h("p", { class: "muted", text: "Loading…" }));
@@ -2440,6 +2446,7 @@ const UI = {
   renderConnector() {
     if (this.connPanel === "slack") return this.renderSlackInfo();
     if (this.connPanel === "gads") return this.renderGads();
+    if (this.connPanel === "blender") return this.renderBlender();
     return this.renderStripe();
   },
   pill([cls, text]) { return h("span", { class: `pill pill-${cls}` }, h("i", { "aria-hidden": "true" }), h("span", { text })); },
@@ -2584,6 +2591,101 @@ const UI = {
     });
     check();
     setTimeout(() => { if (!steps) input.focus({ preventScroll: true }); }, 30);
+    return form;
+  },
+
+  /** Blender: the manager connects a Blender MCP server that runs elsewhere (its URL, and its token if it wants one);
+   * every Claude gets its tools as mcp__blender__*. People see that it's there and what it is. */
+  renderBlender() {
+    const R = role(), c = this.conn || {}, b = c.blender || { connected: false }, manage = !!c.manage, body = $("#connector-body");
+    const key = JSON.stringify([b, manage, this.blenderReplace]);
+    if (body.dataset.key === key) return;
+    body.dataset.key = key;
+    const lede = h("p", { class: "conn-lede" }, "Every Claude on the farm can drive a Blender that runs on another machine, through its MCP server: ",
+      "build scenes and game assets, set materials, animate, render, import and export, and run Python in it. ",
+      h("b", { text: "It runs there, not on the farm's box." }));
+    const can = h("div", { class: "tool-chips conn-can" }, ["Scenes", "Game assets", "Materials", "Animation", "Renders", "Import & export", "Python"]
+      .map(t => h("span", { class: "tool-chip", text: t })));
+    if (!b.connected) {
+      if (!manage) return fill(body, lede, can,
+        h("p", { class: "banner-note" }, h("strong", { text: "NOT CONNECTED. " }), "Ask the farm's manager to connect a Blender server: then your Claude can use it too, and you can still turn it off for your Claude in its SETTINGS."));
+      return fill(body, lede, can, this.blenderForm(null));
+    }
+    const srv = b.server || {}, by = b.by ? String(b.by).replace(/^owner:/, "") : "";
+    const card = h("div", { class: "conn-card" },
+      h("div", { class: "conn-card-main" },
+        h("p", { class: "conn-card-top" }, this.pill(["on", "CONNECTED"])),
+        h("h3", { class: "conn-card-name", text: (srv.title || srv.name || "Blender MCP server").toUpperCase() }),
+        srv.version ? h("p", { class: "muted small", text: `version ${srv.version}` }) : null),
+      h("dl", { class: "stat-row conn-dl" },
+        manage && b.url ? [h("dt", { text: "SERVER" }), h("dd", {}, h("code", { class: "conn-code", text: b.url }))] : null,
+        manage ? [h("dt", { text: "TOKEN" }), h("dd", { text: b.last4 ? `ending …${b.last4}` : "none" })] : null,
+        manage && b.at ? [h("dt", { text: "CONNECTED" }), h("dd", { text: `${nowS() - b.at < 20 ? "just now" : ago(b.at)}${by ? ` by ${by === "manager" ? "the manager" : by}` : ""}` })] : null,
+        h("dt", { text: "TOOLS" }), h("dd", {}, h("code", { class: "conn-code", text: b.tools || "mcp__blender__*" }), " on every Claude")));
+    const mineId = R.owner && App.state?.agents.find(x => x.id === R.owner && !x.remote) ? R.owner : null;
+    const optOut = h("p", { class: "muted small" }, "Anyone can turn Blender off for their own Claude: its ", h("b", { text: "SETTINGS → RULES" }), ", untick ", h("b", { text: "Blender (3D)" }), ". ",
+      mineId ? h("button", { class: "linkish", type: "button", onclick: () => this.openSettings(mineId, "RULES") }, "Open my Claude's rules →") : null);
+    const ask = [h("h3", { class: "kicker", text: "ASK YOUR CLAUDE" }),
+      h("ul", { class: "examples" },
+        h("li", { text: "“Model a low-poly treasure chest with an opening lid and export it as GLB.”" }),
+        h("li", { text: "“Render the scene from the main camera and show me.”" }),
+        h("li", { text: "“Rig this character and give it a walk cycle.”" }))];
+    if (!manage) return fill(body, card, ask, optOut);
+    if (this.blenderReplace) return fill(body, card, h("h3", { class: "kicker", text: "CHANGE THE SERVER" }),
+      this.blenderForm(() => { this.blenderReplace = false; this.renderBlender(); }, b.url));
+    const off = h("button", { class: "btn danger", type: "button" }, "DISCONNECT"), err = h("p", { class: "form-error", role: "alert" });
+    off.addEventListener("click", async () => {
+      if (off.dataset.sure !== "1") { off.dataset.sure = "1"; off.textContent = "SURE? THE CLAUDES LOSE BLENDER"; return; }
+      off.disabled = true; off.textContent = "DISCONNECTING…"; err.textContent = "";
+      try { this.conn = await api("api/connectors/blender/disconnect", {}); this.say("Blender is disconnected: the Claudes' Blender tools are gone."); this.renderBlender(); this.refresh(); }
+      catch (x) { err.textContent = x.message; off.disabled = false; off.dataset.sure = ""; off.textContent = "DISCONNECT"; }
+    });
+    const change = h("button", { class: "btn", type: "button", onclick: () => { this.blenderReplace = true; this.renderBlender(); $("#connector-body input[name=url]")?.focus(); } }, "CHANGE SERVER");
+    fill(body, card, ask, optOut, err, h("div", { class: "dlg-actions" }, change, off));
+  },
+  /** The server's MCP URL and its token (optional), checked by the farm opening an MCP session with it. */
+  blenderForm(onCancel, url) {
+    const input = h("input", { name: "url", type: "url", autocomplete: "off", spellcheck: "false", autocapitalize: "off", maxlength: 1000,
+      placeholder: "https://blender.example.com/mcp", id: "blender-url", value: url || "" });
+    const tok = h("input", { name: "token", type: "password", autocomplete: "off", spellcheck: "false", autocapitalize: "off", maxlength: 2000,
+      placeholder: "optional", id: "blender-token", "data-1p-ignore": "true", "data-lpignore": "true" });
+    const hint = h("p", { class: "key-hint", id: "blender-hint", "aria-live": "polite" });
+    const err = h("p", { class: "form-error", role: "alert" });
+    const go = h("button", { class: "btn primary", type: "submit", disabled: true }, "▶ CONNECT");
+    const form = h("form", { class: "stripe-form", autocomplete: "off" });
+    const ok = () => /^https?:\/\/[^\s/]+/.test(input.value.trim());
+    const check = () => {
+      const v = input.value.trim();
+      hint.textContent = !v ? "Its streamable-HTTP MCP endpoint, often ending in /mcp." : !ok() ? "Starts with https:// (or http:// on a private network)."
+        : /^http:\/\//.test(v) && !/^http:\/\/(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.)/.test(v) ? "Plain http over the internet sends the token in the clear: use https." : "Looks right.";
+      hint.className = "key-hint" + (v && !ok() ? " bad" : v && /clear/.test(hint.textContent) ? " warn" : v ? " ok" : "");
+      go.disabled = !ok() || form.dataset.busy === "1";
+    };
+    input.addEventListener("input", () => { err.textContent = ""; check(); });
+    form.append(
+      h("div", { class: "key-field" }, h("label", { for: "blender-url" }, "SERVER URL"), h("div", { class: "key-row" }, input), hint),
+      h("div", { class: "key-field" }, h("label", { for: "blender-token" }, "TOKEN"), h("div", { class: "key-row" }, tok), err),
+      h("p", { class: "muted small", text: "The farm checks that the server answers, then keeps the URL and token on its box. The token is never shown again. Such a server usually runs Python in Blender: connect only one whose token you're happy for any of the farm's Claudes to use." }),
+      h("div", { class: "dlg-actions save-bar" }, onCancel ? h("button", { class: "btn", type: "button", onclick: onCancel }, "CANCEL") : null, go));
+    form.addEventListener("submit", async (e) => {
+      e.preventDefault();
+      if (!ok() || form.dataset.busy === "1") return;
+      form.dataset.busy = "1"; go.disabled = true; input.readOnly = tok.readOnly = true; err.textContent = "";
+      go.replaceChildren(h("span", { class: "spin", "aria-hidden": "true" }), "CHECKING THE SERVER…");
+      try {
+        const r = await api("api/connectors/blender", { url: input.value.trim(), token: tok.value.trim() });
+        tok.value = ""; this.conn = r; this.blenderReplace = false;
+        const srv = r.blender?.server || {};
+        this.say(`Blender is connected${srv.title || srv.name ? ": " + (srv.title || srv.name) : ""}. Every Claude can use it now.`);
+        this.renderBlender(); this.refresh();
+        $("#dlg-connector").scrollTop = 0;
+      } catch (x) {
+        form.dataset.busy = ""; input.readOnly = tok.readOnly = false; go.textContent = "▶ CONNECT"; check(); err.textContent = x.message;
+        input.focus({ preventScroll: true });
+      }
+    });
+    check();
+    setTimeout(() => input.focus({ preventScroll: true }), 30);
     return form;
   },
 
@@ -2818,12 +2920,12 @@ const UI = {
       this.switchRow(all, "ALL TOOLS", "Off: pick what it may use. Unticked tools are blocked at its next tool call."),
       list];
   },
-  /** A tool group's name in the checklist; Stripe gets its logo, and says when the farm isn't connected to it. */
+  /** A tool group's name in the checklist; Stripe and Blender get their logos, and say when the farm isn't connected to them. */
   groupLabel(gp) {
-    if (gp.id !== "stripe") return h("span", { text: gp.label });
-    const on = !!App.state?.connectors?.stripe;
-    return h("span", { class: "grp-lbl" }, h("img", { src: "stripe.svg", alt: "" }),
-      h("span", {}, gp.label, h("small", { class: on ? "grp-on" : "muted", text: on ? "the farm's account" : "not connected yet" })));
+    if (gp.id !== "stripe" && gp.id !== "blender") return h("span", { text: gp.label });
+    const on = !!App.state?.connectors?.[gp.id];
+    return h("span", { class: "grp-lbl" }, h("img", { src: `${gp.id}.svg`, alt: "" }),
+      h("span", {}, gp.label, h("small", { class: on ? "grp-on" : "muted", text: on ? (gp.id === "stripe" ? "the farm's account" : "the farm's server") : "not connected yet" })));
   },
   /** A checkbox drawn as a switch, with what it does under its name. */
   switchRow(input, name, why) {

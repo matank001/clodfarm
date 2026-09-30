@@ -108,17 +108,107 @@ def stripe_disconnect(workspace: str) -> bool:
         return False
 
 
+# --------------------------------------------------------------------- Blender
+# A Blender MCP server (streamable HTTP) that drives a Blender somewhere else: the farm manager gives the farm its URL
+# and token once, the farm checks that it answers, keeps them in .farm/connectors/blender.json (the farm's user only)
+# and every Claude gets it as its mcp__blender__* tools. The marker header lets the farm tell its own entry from a
+# "blender" server set up by hand (that one is left alone).
+BLENDER_NAME = "blender"
+BLENDER_MARK = {"X-Clodfarm-Connector": BLENDER_NAME}
+
+
+def _blender_path(workspace: str) -> str:
+    return os.path.join(workspace, ".farm", "connectors", "blender.json")
+
+
+def blender_load(workspace: str) -> dict | None:
+    try:
+        with open(_blender_path(workspace)) as f:
+            d = json.load(f)
+        return d if d.get("url") else None
+    except (OSError, ValueError):
+        return None
+
+
+def blender_view(workspace: str) -> dict:
+    """What the UI and CLI show: never the token."""
+    d = blender_load(workspace)
+    if not d:
+        return {"connected": False}
+    return {"connected": True, "url": d["url"], "last4": (d.get("token") or "")[-4:] or None,
+            "server": d.get("server") or {}, "by": d.get("by"), "at": d.get("at"), "tools": f"mcp__{BLENDER_NAME}__*"}
+
+
+def blender_check(url: str, token: str = "") -> dict:
+    """Open an MCP session with the server (initialize) and return who it says it is. Raises ValueError."""
+    url = (url or "").strip()
+    u = urllib.parse.urlparse(url)
+    if u.scheme not in ("http", "https") or not u.netloc:
+        raise ValueError("that isn't an MCP server URL: it looks like https://host/mcp")
+    body = json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "clodfarm", "version": "1"}}})
+    headers = {"Content-Type": "application/json", "Accept": "application/json, text/event-stream", **BLENDER_MARK}
+    if token:
+        headers["Authorization"] = f"Bearer {token.strip()}"
+    req = urllib.request.Request(url, data=body.encode(), method="POST", headers={"User-Agent": "clodfarm", **headers})
+    try:
+        with urllib.request.urlopen(req, timeout=15) as r:
+            text = r.read(65536).decode("utf-8", "replace")
+    except urllib.error.HTTPError as e:
+        if e.code in (401, 403):
+            raise ValueError(f"the server refused the token (HTTP {e.code})") from None
+        raise ValueError(f"the server answered HTTP {e.code}: is this its MCP endpoint (often /mcp)?") from None
+    except OSError as e:
+        raise ValueError(f"couldn't reach the server ({e})") from None
+    for line in [text] + [ln[5:] for ln in text.splitlines() if ln.startswith("data:")]:  # JSON, or an SSE stream
+        try:
+            info = (json.loads(line).get("result") or {}).get("serverInfo")
+        except (ValueError, AttributeError):
+            continue
+        if isinstance(info, dict):
+            return {"name": info.get("name"), "title": info.get("title"), "version": info.get("version")}
+    raise ValueError("the server answered, but not as an MCP server")
+
+
+def blender_connect(workspace: str, url: str, token: str = "", by: str = "") -> dict:
+    server = blender_check(url, token)
+    path = _blender_path(workspace)
+    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+    fd = os.open(path + ".tmp", os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w") as f:
+        json.dump({"url": url.strip(), "token": (token or "").strip(), "server": server, "by": by, "at": time.time()}, f)
+    os.replace(path + ".tmp", path)
+    return blender_view(workspace)
+
+
+def blender_disconnect(workspace: str) -> bool:
+    try:
+        os.remove(_blender_path(workspace))
+        return True
+    except OSError:
+        return False
+
+
 def mcp_servers(workspace: str) -> dict[str, dict]:
     """The connectors' MCP servers every Claude gets (none when nothing is connected)."""
+    out = {}
     d = stripe_load(workspace)
-    if not d:
-        return {}
-    return {STRIPE_NAME: {"type": "http", "url": os.environ.get("FARM_STRIPE_MCP") or STRIPE_MCP,
-                          "headers": {"Authorization": f"Bearer {d['key']}"}}}
+    if d:
+        out[STRIPE_NAME] = {"type": "http", "url": os.environ.get("FARM_STRIPE_MCP") or STRIPE_MCP,
+                            "headers": {"Authorization": f"Bearer {d['key']}"}}
+    b = blender_load(workspace)
+    if b:
+        out[BLENDER_NAME] = {"type": "http", "url": b["url"], "headers": {
+            **({"Authorization": f"Bearer {b['token']}"} if b.get("token") else {}), **BLENDER_MARK}}
+    return out
 
 
 def is_ours(name: str, server: dict) -> bool:
-    return name == STRIPE_NAME and isinstance(server, dict) and server.get("type") == "http" and \
+    if not isinstance(server, dict) or server.get("type") != "http":
+        return False
+    if name == BLENDER_NAME:
+        return (server.get("headers") or {}).get("X-Clodfarm-Connector") == BLENDER_NAME
+    return name == STRIPE_NAME and \
         str(server.get("url", "")).rstrip("/") in (STRIPE_MCP, (os.environ.get("FARM_STRIPE_MCP") or STRIPE_MCP).rstrip("/"))
 
 
@@ -131,12 +221,23 @@ your person explicitly asks for that one thing. Never print or copy the key.
 """
 
 
+BLENDER_GUIDE = """
+## Blender (a connector)
+The farm is connected to a Blender MCP server{server}: your `mcp__blender__*` tools drive a Blender that runs there,
+not on this box (build scenes and game assets, set materials, animate, render, import and export, run Python in it).
+Paths in its tools are on that server. Its own instructions say what it can do: read them before the first call.
+"""
+
+
 def guide_section(workspace: str) -> str:
-    """The farm guide's sections for what is connected (Stripe, Google Ads)."""
+    """The farm guide's sections for what is connected (Stripe, Blender, Google Ads)."""
     d = stripe_load(workspace)
     name = ((d or {}).get("account") or {}).get("name")
     stripe = GUIDE.format(mode=d.get("mode", "?").upper(), acct=f", {name}" if name else "") if d else ""
-    return stripe + gads_guide(workspace)
+    b = blender_load(workspace)
+    title = ((b or {}).get("server") or {}).get("title") or ((b or {}).get("server") or {}).get("name")
+    blender = BLENDER_GUIDE.format(server=f" ({title})" if title else "") if b else ""
+    return stripe + blender + gads_guide(workspace)
 
 
 # ------------------------------------------------------------------ Google Ads

@@ -6,6 +6,7 @@ Accounts the farm connects once, for every Claude on it. The **CONNECTORS** butt
 |---|---|
 | **Slack** | People give the farm work from Slack; a sub-agent answers in the thread ([slack.md](slack.md)). |
 | **Stripe** | Every Claude can use the farm's Stripe account: customers, products, prices, payment links, invoices, subscriptions, balances, and Stripe's docs. |
+| **Blender** | Every Claude can drive a Blender that runs on another machine, through its MCP server: scenes, game assets, materials, animation, renders, import and export, Python. |
 | **Google Ads** | Every Claude can see the farm's ad accounts, run reports (GAQL), keep live dashboards of them, and make changes when its person asks. |
 
 ## Stripe
@@ -28,6 +29,25 @@ The farm manager connects it: **CONNECTORS → STRIPE**, paste a key, **CONNECT*
 
 The Claudes share one container: a Claude with a shell could read the key file. Give the farm a restricted key with
 only the permissions you're happy for any of its Claudes to use ([security.md](security.md)).
+
+## Blender
+
+The farm manager connects a Blender MCP server that runs elsewhere (a streamable-HTTP MCP endpoint, often ending in
+`/mcp`): **CONNECTORS → BLENDER**, its URL and token, **CONNECT**. From the box's shell:
+`clodfarm blender connect https://host/mcp` (its token on stdin, so it stays out of your
+shell history; an empty line for a server without one), `clodfarm blender`, `clodfarm blender disconnect`.
+
+- **How the Claudes use it.** The farm opens an MCP session with the server to check it answers, keeps the URL and
+  token in `/workspace/.farm/connectors/blender.json` (readable by the farm's user only; only the token's last 4
+  characters are shown, and only the manager sees where the server runs), and gives every Claude the server as its
+  `mcp__blender__*` tools. Their farm guide says the Blender runs there, not on the farm's box, so paths in its
+  tools are on that server.
+- **Per Claude.** A person can turn Blender off for their own Claude: its SETTINGS → tools → *Blender (3D)*.
+- **Your own server.** A `blender` MCP server you set up by hand in a Claude's config is left alone.
+- **Disconnect** removes the URL, the token and every Claude's Blender tools.
+
+The Claudes share one container: a Claude with a shell could read the token. Such a server usually runs Python in
+Blender, so connect only a server whose token you're happy for any of the farm's Claudes to use.
 
 ## Google Ads
 

@@ -780,7 +780,7 @@ dialog.conn-menu::backdrop { background: transparent; }
 .conn-card-name { margin: 0; font-size: 12px; overflow-wrap: anywhere; }
 .conn-card .small { margin-top: 2px; }
 .conn-dl { grid-column: 1 / -1; margin: 2px 0 0; padding-top: 10px; border-top: 3px dashed var(--paper-2); }
-.conn-code { font: 19px/1 var(--font-body); background: var(--sky-2); border: 2px solid #b9dcee; border-radius: 4px; padding: 1px 5px; }
+.conn-code { font: 19px/1 var(--font-body); background: var(--sky-2); border: 2px solid #b9dcee; border-radius: 4px; padding: 1px 5px; overflow-wrap: anywhere; }
 .live-note { background: #ffe4d2; border-color: #e0a07a; }
 .live-note strong { color: #9a3412; }
 .dlg-actions.spread { justify-content: flex-start; }

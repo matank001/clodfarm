@@ -26,6 +26,7 @@ GROUPS: dict[str, tuple[str, list[str]]] = {
     "messaging": ("Message other sessions", ["SendMessage"]),
     "browser": ("The farm's browser", ["mcp__browser*"]),
     "stripe": ("Stripe (payments)", ["mcp__stripe__*"]),
+    "blender": ("Blender (3D)", ["mcp__blender__*"]),
     "mcp": ("Other MCP tools", ["mcp__*"]),
 }
 # built-in tools that --disallowedTools can name as they are (the hook covers the shell and MCP patterns)

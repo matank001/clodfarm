@@ -1188,6 +1188,42 @@ def cmd_stripe(cfg, a):
     return 0
 
 
+def cmd_blender(cfg, a):
+    """The Blender connector from a shell: status, connect URL (the token, if the server wants one, on stdin, so it
+    isn't in your shell history), or disconnect. Every Claude on the farm gets mcp__blender__*."""
+    from . import connectors
+    from .agents import AgentManager
+    if a.action in ("connect", "disconnect") and _in_claude():
+        print("clodfarm blender: the farm manager connects Blender (from the box's shell)", file=sys.stderr)
+        return 2
+    if a.action == "connect":
+        if not a.url:
+            print("clodfarm blender connect URL  (the token on stdin; an empty line for none)", file=sys.stderr)
+            return 2
+        token = sys.stdin.readline().strip() if not sys.stdin.isatty() else \
+            __import__("getpass").getpass("Token (Enter for none): ")
+        try:
+            v = connectors.blender_connect(cfg.workspace, a.url, token, by="cli")
+        except ValueError as e:
+            print(f"clodfarm blender: {e}", file=sys.stderr)
+            return 1
+        AgentManager(cfg).share_connectors()
+        srv = v.get("server") or {}
+        _store(cfg).event("connector.blender", f"Blender connected ({srv.get('title') or srv.get('name') or 'an MCP server'})"
+                          f" from a shell: every Claude gets {v['tools']}", by="cli")
+    elif a.action == "disconnect":
+        if connectors.blender_disconnect(cfg.workspace):
+            AgentManager(cfg).share_connectors()
+            _store(cfg).event("connector.blender", "Blender disconnected from a shell", by="cli")
+    v = connectors.blender_view(cfg.workspace)
+    srv = v.get("server") or {}
+    _out(v, a.json, "Blender: not connected (`clodfarm blender connect URL`, the token on stdin)"
+         if not v["connected"] else f"Blender: connected to {v['url']}"
+         + (f" ({srv.get('title') or srv.get('name')})" if srv.get("title") or srv.get("name") else "")
+         + (f", token …{v['last4']}" if v.get("last4") else ", no token") + f"; the Claudes' tools: {v['tools']}")
+    return 0
+
+
 def cmd_gads(cfg, a):
     """Google Ads for the Claudes: the accounts, GAQL reports, and an access token (with the headers) for changes."""
     from . import connectors
@@ -1466,6 +1502,9 @@ def main(argv=None):
     gd.add_argument("--refresh", action="store_true")
     stp = add("stripe", cmd_stripe, "the Stripe connector: status | connect (key on stdin) | disconnect")
     stp.add_argument("action", nargs="?", default="status", choices=["status", "connect", "disconnect"])
+    bl = add("blender", cmd_blender, "the Blender connector: status | connect URL (token on stdin) | disconnect")
+    bl.add_argument("action", nargs="?", default="status", choices=["status", "connect", "disconnect"])
+    bl.add_argument("url", nargs="?", default="")
     pr = add("pair", cmd_pair, "a one-time link that signs your person in to you on the farm UI (for their phone)")
     add("invite", cmd_invite, "a link that lets one person hatch a Claude of their own here, once (for 7 days)")
     ap = add("approvals", cmd_approvals, "missions and messages waiting for a person's approval")
