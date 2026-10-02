@@ -65,10 +65,14 @@ def test_a_bot_is_parsed_the_way_providers_write_it():
     for bad in ({"provider": "gpt", "model": "m"}, {"provider": "custom", "model": "m"},
                 {"provider": "custom", "url": "https://user:pw@gw.example.com", "model": "m"},
                 {"provider": "custom", "url": "ftp://gw.example.com", "model": "m"},
-                {"provider": "openrouter", "model": ""}, {"provider": "openrouter", "model": "a b"},
+                {"provider": "custom", "url": "https://gw.example.com", "model": ""},
+                {"provider": "openrouter", "model": "a b"},
                 {"provider": "openrouter", "model": "m", "workers": 9}):
         with pytest.raises(ValueError):
             bots.parse(bad)
+    assert bots.parse({"provider": "openai", "model": ""})["model"] == bots.PROVIDERS["openai"]["latest"], \
+        "no model named: the provider's latest"
+    assert bots.parse({"provider": "xai"})["model"] == "grok-4.7"
     with pytest.raises(ValueError, match="needs an API key"):
         bots.check_key("openrouter", "")
     assert bots.check_key("ollama", "") == ""

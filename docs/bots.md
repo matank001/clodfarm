@@ -19,14 +19,15 @@ farm use another lab's model where that model is the better fit. The farm keeps 
 
 ## Add one
 
-In the farm UI: **+ ADD AGENT → ADD AGENT WITH API KEY**. Pick the provider (its endpoint is filled in; tick EDIT
-ENDPOINT for another one), name the model, paste the API key and click **CHECK & ADD AGENT**. The farm asks the model for one word first and keeps the bot only if it answers. The bot is on
-the farm a few seconds later, wearing headphones.
+In the farm UI: **+ ADD AGENT → ADD AGENT WITH API KEY**. Pick the provider and paste its API key; that's all it
+needs. The model is optional (empty: the provider's latest, e.g. `gpt-6.1-sol`, `grok-4.7`, `gemini-3.1-pro-preview`),
+and so is another endpoint (tick EDIT ENDPOINT). Click **CHECK & ADD AGENT**. The farm asks the model for one word
+first and keeps the bot only if it answers. The bot is on the farm a few seconds later, wearing headphones.
 
 From a shell (the key is read from stdin, or from an environment variable with `--key-env`):
 
 ```bash
-docker exec -i clodfarm clodfarm bot add gpt --provider openai --model gpt-6.1-sol <<< "$OPENAI_API_KEY"
+docker exec -i clodfarm clodfarm bot add gpt --provider openai <<< "$OPENAI_API_KEY"          # its latest model
 docker exec -i clodfarm clodfarm bot add grok --provider xai --model grok-4.7 <<< "$XAI_API_KEY"
 docker exec -i clodfarm clodfarm bot add gemini --provider gemini --model gemini-3.1-pro-preview --effort high <<< "$GEMINI_API_KEY"
 docker exec -i clodfarm clodfarm bot add qwen --provider openrouter --model qwen/qwen3-coder:free <<< "$OPENROUTER_KEY"

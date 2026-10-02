@@ -28,15 +28,17 @@ import urllib.request
 # dialect: "anthropic" (Claude Code talks to it as is), "chat" (OpenAI's Chat Completions, through the relay) or
 # "responses" (OpenAI's Responses API, through the relay: OpenAI's newest models take tools with reasoning only there)
 PROVIDERS = {
+    # latest: the model a bot gets when none is named (the provider's newest one that takes Claude Code's tools)
     "openai": {"label": "OpenAI", "url": "https://api.openai.com/v1", "key": True, "example": "gpt-6.1-sol",
-               "dialect": "responses"},
-    "xai": {"label": "xAI", "url": "https://api.x.ai/v1", "key": True, "example": "grok-4.7", "dialect": "chat"},
+               "latest": "gpt-6.1-sol", "dialect": "responses"},
+    "xai": {"label": "xAI", "url": "https://api.x.ai/v1", "key": True, "example": "grok-4.7", "latest": "grok-4.7",
+            "dialect": "chat"},
     "gemini": {"label": "Gemini", "url": "https://generativelanguage.googleapis.com/v1beta/openai", "key": True,
-               "example": "gemini-3.1-pro-preview", "dialect": "chat"},
+               "example": "gemini-3.1-pro-preview", "latest": "gemini-3.1-pro-preview", "dialect": "chat"},
     "groq": {"label": "Groq", "url": "https://api.groq.com/openai/v1", "key": True, "example": "openai/gpt-oss-120b",
-             "dialect": "chat"},
+             "latest": "openai/gpt-oss-120b", "dialect": "chat"},
     "openrouter": {"label": "OpenRouter", "url": "https://openrouter.ai/api", "key": True,
-                   "example": "qwen/qwen3-coder:free", "dialect": "anthropic"},
+                   "example": "qwen/qwen3-coder:free", "latest": "qwen/qwen3-coder:free", "dialect": "anthropic"},
     # the farm runs in a container: Ollama on the host is host.docker.internal, not localhost
     "ollama": {"label": "Ollama", "url": "http://host.docker.internal:11434", "key": False, "example": "qwen3-coder",
                "dialect": "anthropic"},
@@ -86,7 +88,7 @@ def parse(data: dict) -> dict:
     if u.scheme not in ("http", "https") or not u.hostname or u.username or u.password or u.query or u.fragment \
             or any(c.isspace() for c in url):
         raise ValueError("the address is the provider's base URL, like https://openrouter.ai/api")
-    model = str(data.get("model") or "").strip()
+    model = str(data.get("model") or "").strip() or PROVIDERS[provider].get("latest", "")  # none named: its latest
     if not MODEL_RE.fullmatch(model):
         raise ValueError("name the model it runs, like " + (PROVIDERS[provider]["example"] or "the provider calls it"))
     takes = "any" if str(data.get("takes") or "sent") == "any" else "sent"

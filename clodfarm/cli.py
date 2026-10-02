@@ -1746,8 +1746,8 @@ def main(argv=None):
     ba = bts.add_parser("add", help="add a bot; its API key is read from stdin (or --key-env)")
     ba.add_argument("name")
     ba.add_argument("--provider", default="openrouter", choices=list(_bot_providers()))
-    ba.add_argument("--model", required=True, help="the model, as the provider names it (gpt-6.1-sol, grok-4.7, "
-                                                   "gemini-3.1-pro-preview, qwen/qwen3-coder:free)")
+    ba.add_argument("--model", help="the model, as the provider names it (default: the provider's latest: "
+                                    "gpt-6.1-sol, grok-4.7, gemini-3.1-pro-preview, qwen/qwen3-coder:free)")
     ba.add_argument("--url", help="the provider's base URL (default: the provider's own)")
     ba.add_argument("--workers", type=int, default=1, help="sub-agents it runs at a time (1-4; free tiers: 1)")
     ba.add_argument("--any", action="store_true", help="take any sub-agent, not only the ones sent to it")
