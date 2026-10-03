@@ -48,7 +48,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlsplit
 
-from . import __version__, boards, boot, bots, browser, connectors, dashboards, gitops, planner, policy, sso
+from . import __version__, boards, boot, bots, browser, connectors, dashboards, gitops, planner, policy, scrub, sso
 from . import mcp
 from .agents import AgentManager, room_note
 from .slack import SlackBridge
@@ -499,6 +499,24 @@ class FarmUI:
         profs = self.browsers.registry.all()
         mine = [p["name"] for p in profs if self.profile_mine(p, who)]
         return (mine or ([p["name"] for p in profs] if who.manager else []) or [""])[0]
+
+    def broadcast(self, st: dict | None = None) -> bool:
+        """Its live feed is public (FARM_UI_BROADCAST=1, or the manager's switch): what its agents think, say and do,
+        scrubbed, for anyone who may watch the farm (clod.farm/live reads it)."""
+        st = st if st is not None else self.store.settings()
+        return bool(st.get("broadcast")) or os.environ.get("FARM_UI_BROADCAST") == "1"
+
+    def live_view(self, since: str | None, limit: int) -> dict:
+        """The live feed after ``since``, every seat's spend for the last two weeks, scrubbed."""
+        items = self.store.live(since, max(1, min(limit, 500)))
+        known = scrub.secrets(self.cfg.workspace)
+        out = [scrub.obj({k: v for k, v in it.items() if k not in ("PK", "ver", "expires_at")}, known)
+               for it in items]
+        for o in out:
+            o["id"] = o.pop("SK").replace("#", "-")  # a cursor that travels in a URL
+        return {"farm": self.cfg.farm, "items": out,
+                "cursor": out[-1]["id"] if out else (since or "").replace("#", "-") or None,
+                "spend": self.store.spend_rows(14), "at": now()}
 
     def private(self, st: dict | None = None) -> bool:
         """Only signed-in people watch: the manager made it private, or its host did (FARM_UI_PRIVATE=1)."""
@@ -1008,6 +1026,17 @@ def make_handler(ui: FarmUI):
                                        "hatch": self._hatch_view(who)}, 200 if who.can_view else 401)
                 if not who.can_view:
                     return self._err(401, "this farm is private: log in first")
+                if path == "/api/live":  # the live feed: the farm's own people, or anyone when it broadcasts
+                    if not (who.manager or who.owner or ui.broadcast()):
+                        return self._err(403, "the live feed is for the farm's people, unless the farm broadcasts")
+                    q = {k: v[-1] for k, v in parse_qs(urlsplit(self.path).query).items()}
+                    try:
+                        limit = int(q.get("limit") or 200)
+                    except ValueError:
+                        limit = 200
+                    since = q.get("since") or ""
+                    since = since.replace("-", "#") if re.fullmatch(r"[0-9.]{10,20}-[0-9a-f]{3,12}", since) else None
+                    return self._json(ui.live_view(since, limit))
                 if path == "/api/state":
                     body, tag = ui.state_for(who)
                     if self.headers.get("If-None-Match") == tag:
@@ -1596,7 +1625,7 @@ def make_handler(ui: FarmUI):
                 if "private" in data:
                     ch["private"] = bool(data["private"])
                 # there are no viewer passwords: a private farm is its Claudes' people (and its manager) only
-                for k in ("hatch_open", "mcp"):
+                for k in ("hatch_open", "mcp", "broadcast"):
                     if k in data:
                         ch[k] = bool(data[k])
                 for k, lo, hi in (("max_claudes", 1, 1000), ("hatch_per_ip_hour", 1, 100)):

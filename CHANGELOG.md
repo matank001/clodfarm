@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.11.0 (2026-10-03)
+
+- **The live feed.** The farm keeps what its sub-agents think, say and do as they do it, for a day: thoughts (Claude's
+  thinking, other models' reasoning), what they say, each tool they call, and messages between Claudes.
+  `GET /api/live` reads it, with every seat's spend. It's for the farm's people, and for anyone when the farm
+  **broadcasts** (`FARM_UI_BROADCAST=1`, or the manager's switch). Everything in it is scrubbed first: the farm's own
+  secrets, and anything that looks like a key, a token, an email address or a card number. See docs/ui.md.
+- **MCP servers from the farm's host.** `FARM_REMOTE_MCP` gives every Claude remote MCP servers (`mcp__<name>__*`)
+  with their guide text. See docs/connectors.md.
+- **Farm-style pickers.** Every menu on the farm's pages (the farm, TASKS, the browser) opens a pixel-art list
+  instead of the system's, with each provider's mark beside it.
+- **A shorter agent form.** The provider and its API key come first. The model is optional: with none named, the
+  agent runs on the provider's latest (gpt-6.1-sol, grok-4.7, gemini-3.1-pro-preview...), in the UI, on an invite and
+  in `clodfarm bot add`.
+
 ## 1.10.0 (2026-10-02)
 
 - **+ ADD AGENT.** The dock's + NEW CLAUDE / + INVITE A CLAUDE is now + ADD AGENT, with the Claude, OpenAI and Grok

@@ -28,6 +28,7 @@ Items (PK / SK):
     STATS              / TOKENS[#day|@claude]  tokens burned (input, output, cache write, cache read)
     PAIR               / <token hash>      a one-time link (or code) that signs a person in to their Claude
     LOGIN              / <username>        a username and password that sign a person in to their Claude (or bot)
+    LIVE               / <ts>#<rand>       the live feed: what an agent thought, said or did (feed.py), for a day
     EVENT#<yyyy-mm-dd> / <ts>#<rand>       event log (expires after 30 days)
 """
 
@@ -461,6 +462,10 @@ class Store:
                         "expires_at": int(t + EVENT_TTL)})
         flags = " (urgent)" if urgent else " (wake)" if wake else ""
         self.event("msg.sent", f"{frm} -> {to}: {text[:200]}{flags}", by=frm)
+        try:  # the live feed shows who talks to whom
+            self.live_add([{"kind": "msg", "text": " ".join(text.split())[:500], "to": to}], claude=frm)
+        except Exception:  # noqa: BLE001 - a message is sent whether or not the feed takes it
+            pass
         return item
 
     def _hold(self, frm: str, to: str) -> bool:
@@ -818,6 +823,35 @@ class Store:
         if it:
             self.b.delete("CLAUDE", cid, expect_ver=int(it.get("ver", 0)))
 
+    # --------------------------------------------------------------- the live feed
+    LIVE_TTL = 86400
+
+    def live_add(self, items: list[dict], claude: str | None = None, task: str | None = None,
+                 owner: str | None = None):
+        """What an agent thought, said or did (feed.py), for the live feed. Kept for a day."""
+        t = now()
+        for i, it in enumerate(items):
+            self.b.put({"PK": "LIVE", "SK": f"{t:017.6f}#{i:03d}{secrets.token_hex(2)}", "ver": 1,
+                        **{k: v for k, v in it.items() if v not in (None, "")},
+                        "claude": claude, "task": task, "owner": owner, "at": t, "expires_at": int(t + self.LIVE_TTL)})
+
+    def live(self, since: str | None = None, limit: int = 200) -> list[dict]:
+        """The feed after cursor ``since`` (an item's SK), oldest first; the newest ``limit`` when there's none."""
+        if since:
+            return self.b.query("LIVE", sk_gt=since, limit=limit)
+        start = f"{now() - self.LIVE_TTL:017.6f}"
+        return self.b.query("LIVE", sk_gt=start)[-limit:]
+
+    def spend_rows(self, days: int = 14) -> list[dict]:
+        """Every seat's list-price spend per day, for the last ``days`` days."""
+        first = time.strftime("%Y-%m-%d", time.gmtime(now() - days * 86400))
+        out = []
+        for it in self.b.query("SPEND"):
+            seat, _, day = it["SK"].rpartition("#")
+            if day >= first:
+                out.append({"seat": seat, "day": day, "usd": round(float(it.get("usd") or 0), 6)})
+        return out
+
     # --------------------------------------------------------------- logins
     def login(self, username: str) -> dict | None:
         """The username and password that sign a person in to their Claude: its salt and hash, and which Claude."""
@@ -845,7 +879,8 @@ class Store:
                 self.b.delete("LOGIN", it["SK"])
 
     # --------------------------------------------------------------- settings
-    SETTINGS = {"private": False, "hatch_open": True, "max_claudes": 100, "hatch_per_ip_hour": 3, "mcp": True}
+    SETTINGS = {"private": False, "hatch_open": True, "max_claudes": 100, "hatch_per_ip_hour": 3, "mcp": True,
+                "broadcast": False}
 
     def settings(self) -> dict:
         """The farm manager's switches: a private farm (its Claudes' people only), hatching open or not, its limits,

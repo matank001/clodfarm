@@ -189,9 +189,30 @@ def blender_disconnect(workspace: str) -> bool:
         return False
 
 
+def remote_mcp() -> dict[str, dict]:
+    """Remote MCP servers the farm's host gives every Claude (FARM_REMOTE_MCP, JSON: {name: {url, token, guide}}),
+    as `mcp__<name>__*`: an arena the farm competes in, a company's tools. Wrong entries are left out."""
+    try:
+        d = json.loads(os.environ.get("FARM_REMOTE_MCP") or "{}")
+    except ValueError:
+        return {}
+    out = {}
+    for name, v in (d.items() if isinstance(d, dict) else []):
+        if not (isinstance(v, dict) and re.fullmatch(r"[a-z][a-z0-9_]{1,30}", str(name)) and
+                str(v.get("url") or "").startswith(("https://", "http://"))):
+            continue
+        if name in (STRIPE_NAME, BLENDER_NAME):
+            continue
+        out[name] = {"url": str(v["url"]), "token": str(v.get("token") or ""), "guide": str(v.get("guide") or "")[:4000]}
+    return out
+
+
 def mcp_servers(workspace: str) -> dict[str, dict]:
     """The connectors' MCP servers every Claude gets (none when nothing is connected)."""
     out = {}
+    for name, v in remote_mcp().items():
+        out[name] = {"type": "http", "url": v["url"], "headers": {
+            **({"Authorization": f"Bearer {v['token']}"} if v["token"] else {}), "X-Clodfarm-Connector": name}}
     d = stripe_load(workspace)
     if d:
         out[STRIPE_NAME] = {"type": "http", "url": os.environ.get("FARM_STRIPE_MCP") or STRIPE_MCP,
@@ -206,8 +227,8 @@ def mcp_servers(workspace: str) -> dict[str, dict]:
 def is_ours(name: str, server: dict) -> bool:
     if not isinstance(server, dict) or server.get("type") != "http":
         return False
-    if name == BLENDER_NAME:
-        return (server.get("headers") or {}).get("X-Clodfarm-Connector") == BLENDER_NAME
+    if name == BLENDER_NAME or name in remote_mcp():
+        return (server.get("headers") or {}).get("X-Clodfarm-Connector") == name
     return name == STRIPE_NAME and \
         str(server.get("url", "")).rstrip("/") in (STRIPE_MCP, (os.environ.get("FARM_STRIPE_MCP") or STRIPE_MCP).rstrip("/"))
 
@@ -237,7 +258,9 @@ def guide_section(workspace: str) -> str:
     b = blender_load(workspace)
     title = ((b or {}).get("server") or {}).get("title") or ((b or {}).get("server") or {}).get("name")
     blender = BLENDER_GUIDE.format(server=f" ({title})" if title else "") if b else ""
-    return stripe + blender + gads_guide(workspace)
+    remote = "".join(f"\n## {name} (an MCP server of the farm's host)\nYour `mcp__{name}__*` tools reach it.\n"
+                     + (v["guide"].strip() + "\n" if v["guide"] else "") for name, v in remote_mcp().items())
+    return stripe + blender + gads_guide(workspace) + remote
 
 
 # ------------------------------------------------------------------ Google Ads

@@ -262,6 +262,11 @@ def turn(prompt: str, session: str, inbox, first: bool = True) -> int:
             active = True
     if got:
         text += " | mail: " + " || ".join(got)
+    if "THINK" in prompt:  # it thinks out loud and calls a tool first (the live feed)
+        out({"type": "assistant", "message": {"role": "assistant", "content": [
+            {"type": "thinking", "thinking": "I should list the files. My key is sk-proj-abcdefghijklmnopqrstuv.",
+             "signature": "x"},
+            {"type": "tool_use", "id": "t1", "name": "Bash", "input": {"command": "ls -la", "description": "List"}}]}})
     out({"type": "assistant", "message": {"role": "assistant", "content": [{"type": "text", "text": text}],
                                           "usage": {"output_tokens": 42}}})
     out({"type": "result", "subtype": "success", "is_error": False, "session_id": session, "result": text,

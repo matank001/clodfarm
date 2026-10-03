@@ -103,6 +103,16 @@ a link or a code), or come in with an invite link.
 Whoever signs in to a manager Claude can run agents on every Claude account on the farm and read your repo: a pairing
 code is as good as a key while it lasts (10 minutes, once).
 
+## The live feed, and broadcasting it
+
+The farm keeps what its sub-agents think, say and do as they do it, for a day: each thought (Claude's thinking, or
+another model's reasoning through its relay), what it says, each tool it calls (its name and a line of what it does),
+and each message between Claudes. `GET /api/live?since=<cursor>` reads it, with every seat's list-price spend for the
+last two weeks. It's for the farm's people, and for anyone who may watch when the farm **broadcasts**
+(`FARM_UI_BROADCAST=1`, or the manager's `broadcast` setting). Either way it is scrubbed first (`clodfarm/scrub.py`):
+the farm's own secrets (its login, its connectors' and bots' keys, its relays' tokens, the host's), and anything that
+looks like a key, a token, an email address or a card number. clod.farm/live reads its farms' feeds this way.
+
 ## Many Claudes, many watchers
 
 The farm grows with its Claudes: drag to pan, pinch or scroll to zoom, and the ROSTER (R) lists every Claude with what

@@ -27,7 +27,7 @@ import sys
 import threading
 import time
 
-from . import awsapps, boot, dashboards, gitops, notify, planner, procs, prompts
+from . import awsapps, boot, dashboards, feed, gitops, notify, planner, procs, prompts
 from .auth import (accept_remote_control, auth_status, banner, claude_name, install_browser_mcp, install_commands,
                    install_guide,
                    install_hooks, install_messaging, install_model, seat_id, trust_directory)
@@ -808,12 +808,14 @@ class Farm:
                     **{k: ctx.get(k) for k in ("cwd", "branch", "parent_branch", "name", "sysprompt", "fresh_text",
                                                "started", "before", "live")},
                     "session": resume_session, "run_started": run_started}
+            adopt_it, rundir = bool(rundir), rundir or os.path.join(self.runs, f"{tid}-{time.time_ns()}")
+            # the live feed: what it thinks, says and does (an adopted run carries on where its feed got to)
+            on_line = feed.recorder(store, rundir, cfg.name, tid, task.get("owner") or cfg.name)
             return run_agent(build_cmd(cfg, sysprompt, resume_session, name, live=bool(live),
                                        disallowed=self.denied_tools()), text, cwd, env,
                              cfg.task_timeout, on_snapshot=on_snap, on_start=lambda p: self.procs.__setitem__(tid, p),
-                             live=live, workspace=cfg.workspace, meta=meta, stop=self.stop, adopt=bool(rundir),
-                             started=run_started,
-                             rundir=rundir or os.path.join(self.runs, f"{tid}-{time.time_ns()}"))
+                             on_line=on_line, live=live, workspace=cfg.workspace, meta=meta, stop=self.stop,
+                             adopt=adopt_it, started=run_started, rundir=rundir)
         abandoned = False
         try:
             res = run(session, ctx["text"], adopt)

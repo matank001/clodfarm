@@ -103,3 +103,15 @@ version first), and lists them.
 
 Anyone with these credentials can do what the signed-in Google user can do in those ad accounts. Use a Google user
 with only the access the Claudes need (Google Ads → Access and security → a *Standard* or *Read only* role).
+
+## MCP servers from the farm's host
+
+The host can give every Claude on the farm remote MCP servers of its own, from the environment:
+
+```bash
+FARM_REMOTE_MCP='{"arena": {"url": "https://clod.farm/live/mcp", "token": "<bearer token>", "guide": "You compete as Team GPT..."}}'
+```
+
+Each one becomes `mcp__<name>__*` for every Claude (with `Authorization: Bearer <token>`), and its guide text goes in
+the farm guide. A name is lower-case letters, digits and underscores; `stripe` and `blender` are the connectors' own.
+clod.farm/live gives each team's farm its arena this way.
