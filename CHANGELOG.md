@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.11.1 (2026-10-03)
+
+- List prices for the newest models, so a bot on them is counted at its real cost: gpt-6.1-sol ($2 in, $10 out per
+  million tokens), grok-4.7 ($2 / $6, not grok-4's $3 / $15) and gemini-3.1-pro ($2 / $12).
+
 ## 1.11.0 (2026-10-03)
 
 - **The live feed.** The farm keeps what its sub-agents think, say and do as they do it, for a day: thoughts (Claude's

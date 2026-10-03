@@ -8,16 +8,18 @@ this table. A model in neither costs $0 (and `clodfarm bot add` says so).
 
 from __future__ import annotations
 
-# provider -> model prefix -> (input, cached input, output) USD per million tokens, list prices as published
+# provider -> model prefix -> (input, cached input, output) USD per million tokens, list prices as published (the
+# short-context tier: a model that charges more past 200k-272k input tokens is counted at its base price)
 TABLE: dict[str, dict[str, tuple[float, float, float]]] = {
     "openai": {"gpt-4o-mini": (0.15, 0.075, 0.60), "gpt-4o": (2.50, 1.25, 10.00), "gpt-4.1-nano": (0.10, 0.025, 0.40),
                "gpt-4.1-mini": (0.40, 0.10, 1.60), "gpt-4.1": (2.00, 0.50, 8.00), "gpt-5-nano": (0.05, 0.005, 0.40),
                "gpt-5-mini": (0.25, 0.025, 2.00), "gpt-5": (1.25, 0.125, 10.00), "o4-mini": (1.10, 0.275, 4.40),
-               "o3": (2.00, 0.50, 8.00)},
-    "xai": {"grok-4": (3.00, 0.75, 15.00), "grok-3-mini": (0.30, 0.075, 0.50), "grok-3": (3.00, 0.75, 15.00),
-            "grok-code-fast": (0.20, 0.02, 1.50)},
-    "gemini": {"gemini-2.5-pro": (1.25, 0.31, 10.00), "gemini-2.5-flash-lite": (0.10, 0.025, 0.40),
-               "gemini-2.5-flash": (0.30, 0.075, 2.50), "gemini-2.0-flash": (0.10, 0.025, 0.40)},
+               "o3": (2.00, 0.50, 8.00), "gpt-6.1-sol": (2.00, 0.10, 10.00)},
+    "xai": {"grok-4.7": (2.00, 0.50, 6.00), "grok-4": (3.00, 0.75, 15.00), "grok-3-mini": (0.30, 0.075, 0.50),
+            "grok-3": (3.00, 0.75, 15.00), "grok-code-fast": (0.20, 0.02, 1.50)},
+    "gemini": {"gemini-3.1-pro": (2.00, 0.20, 12.00), "gemini-2.5-pro": (1.25, 0.31, 10.00),
+               "gemini-2.5-flash-lite": (0.10, 0.025, 0.40), "gemini-2.5-flash": (0.30, 0.075, 2.50),
+               "gemini-2.0-flash": (0.10, 0.025, 0.40)},
     "groq": {"llama-3.3-70b": (0.59, 0.59, 0.79), "llama-3.1-8b": (0.05, 0.05, 0.08),
              "openai/gpt-oss-120b": (0.15, 0.15, 0.75), "openai/gpt-oss-20b": (0.10, 0.10, 0.50),
              "moonshotai/kimi-k2": (1.00, 0.50, 3.00)},

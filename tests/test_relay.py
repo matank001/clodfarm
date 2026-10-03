@@ -390,6 +390,9 @@ def test_list_prices():
     assert prices.price("openai", "gpt-5-mini-2025-08-07") == prices.TABLE["openai"]["gpt-5-mini"], "longest prefix"
     assert prices.price("xai", "grok-4-0709") == prices.TABLE["xai"]["grok-4"]
     assert prices.price("openai", "some-new-model") is None
+    assert prices.price("xai", "grok-4.7") == (2.00, 0.50, 6.00), "the newer model's own price, not grok-4's"
+    assert prices.price("openai", "gpt-6.1-sol") == (2.00, 0.10, 10.00)
+    assert prices.price("gemini", "gemini-3.1-pro-preview") == (2.00, 0.20, 12.00)
     assert prices.price("xai", "grok-9", {"in": 2, "out": 6}) == (2.0, 2.0, 6.0), "the bot's own price wins"
     u = {"input_tokens": 1_000_000, "cache_read_input_tokens": 2_000_000, "output_tokens": 500_000}
     assert prices.cost("gemini", "gemini-2.5-pro", u) == pytest.approx(1.25 + 2 * 0.31 + 5.0)
