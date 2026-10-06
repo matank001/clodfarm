@@ -51,6 +51,7 @@ instead of losing it; see [upgrades.md](upgrades.md).
 | `upgrade.py` | `clodfarm upgrade`: install, check, switch, hand over, show the agents kept running. |
 | `uikeeper.py` | The UI as its own process, rolled with no downtime. |
 | `policy.py` | The tools a Claude's person turned off, and the PreToolUse decision. |
+| `mod/` | The farm's mod: a Claude Code plugin of function hooks every farm session loads. It wakes idle conversations for their mail, gates and logs `SendMessage`, and gives the model a `msg` tool (see [agents.md](agents.md#the-farms-mod)). |
 | `planner.py` | The planner's cycles. |
 | `web.py` | The farm UI: roles (public, viewer, owner, manager), hatching, approvals, the manager panel. |
 | `boards.py` | Every Claude's whiteboard: its elements, revisions and what a page asks for. |

@@ -434,6 +434,8 @@ def cmd_hook(cfg, a):
         ev = json.loads(sys.stdin.read() or "{}")
     except ValueError:
         ev = {}
+    if getattr(a, "mod", None):
+        return _mod(cfg, a.mod, ev)
     name, sid = ev.get("hook_event_name", ""), ev.get("session_id")
     if getattr(a, "policy", False) or name == "PreToolUse":
         return _pre_tool(cfg, ev)
@@ -499,18 +501,57 @@ def _pre_tool(cfg, ev: dict) -> int:
     try:
         ok, why = policy.decide(policy.load(claude_home()), tool, inp)
         if ok and tool == "SendMessage":
-            to = _peer(inp.get("to") or inp.get("recipient") or "")
-            me = os.environ.get("FARM_OWNER") or cfg.name
-            store = _store(cfg)
-            target = (store.get_task(to) or {}).get("owner") if TASK_ID.fullmatch(to or "") else to
-            if target and target != me and store.approving(target):
-                ok, why = False, (f"{target}'s person approves everything sent to it. Send it with `clodfarm msg "
-                                  f"{to} \"...\"` instead: they get asked on their phone.")
+            why = _send_refusal(cfg, _store(cfg), inp.get("to") or inp.get("recipient") or "")
+            ok = not why
         out = policy.hook_output(ok, why)
         if out:
             print(json.dumps(out))
     except Exception as e:  # noqa: BLE001
         print(f"clodfarm hook: {e!r}"[:300], file=sys.stderr)
+    return 0
+
+
+def _send_refusal(cfg, store, to: str) -> str:
+    """Why a message sent with Claude Code's SendMessage to ``to`` (a session name) is turned away, or "": its Claude's
+    person approves everything sent to it, so it goes through `clodfarm msg`, which asks them."""
+    to = _peer(to)
+    me = os.environ.get("FARM_OWNER") or cfg.name
+    target = (store.get_task(to) or {}).get("owner") if TASK_ID.fullmatch(to or "") else to
+    if target and target != me and store.approving(target):
+        return (f"{target}'s person approves everything sent to it. Send it with `clodfarm msg {to} \"...\"` "
+                f"instead: they get asked on their phone.")
+    return ""
+
+
+def _log_sent(cfg, store, to: str, text: str):
+    frm = os.environ.get("FARM_OWNER") or cfg.name
+    store.event("msg.sent", f"{frm} -> {_peer(to or '?')}: {text[:200]} (live)", by=frm)
+
+
+def _mod(cfg, action: str, ev: dict) -> int:
+    """The farm's mod (clodfarm/mod, loaded in every farm session) asks the farm with `clodfarm hook --mod <action>`,
+    its input as JSON on stdin and the answer as JSON on stdout:
+      * take {how}: this session's mail, claimed (exactly once), as the text the model reads ("" for none)
+      * send {to}: whether a SendMessage to ``to`` may go ({ok, why})
+      * sent {to, text}: a SendMessage was delivered: into the farm's event log
+    Like every hook it never fails the session: a problem is an empty answer, and the mod goes on without it."""
+    from .prompts import mail_text
+    out: dict = {}
+    try:
+        store = _store(cfg)
+        if action == "take":
+            msgs = _take_mail(store, cfg, str(ev.get("how") or "wake"))
+            out = {"text": mail_text(msgs) if msgs else ""}
+        elif action == "send":
+            why = _send_refusal(cfg, store, str(ev.get("to") or ""))
+            out = {"ok": not why, "why": why}
+        elif action == "sent":
+            if str(ev.get("text") or "").strip():
+                _log_sent(cfg, store, str(ev.get("to") or ""), str(ev["text"]))
+            out = {"ok": True}
+    except Exception as e:  # noqa: BLE001
+        print(f"clodfarm hook --mod {action}: {e!r}"[:300], file=sys.stderr)
+    print(json.dumps(out))
     return 0
 
 
@@ -527,9 +568,7 @@ def _log_native(cfg, store, ev: dict):
     text = inp.get("message") or inp.get("content") or ""
     if not isinstance(text, str) or not text.strip():
         return
-    frm = os.environ.get("FARM_OWNER") or cfg.name
-    store.event("msg.sent", f"{frm} -> {_peer(inp.get('to') or inp.get('recipient') or '?')}: {text[:200]} (live)",
-                by=frm)
+    _log_sent(cfg, store, inp.get("to") or inp.get("recipient") or "", text)
 
 
 def _remote_conversation(kind: str) -> bool:
@@ -1585,6 +1624,7 @@ def main(argv=None):
     hk = add("hook", cmd_hook, argparse.SUPPRESS)
     hk.add_argument("--listen", action="store_true", help=argparse.SUPPRESS)
     hk.add_argument("--policy", action="store_true", help=argparse.SUPPRESS)
+    hk.add_argument("--mod", choices=("take", "send", "sent"), help=argparse.SUPPRESS)
     ss = add("sessions", cmd_sessions, "every Claude session on the farm (conversations and sub-agents)")
     ss.add_argument("--claude", help="only this Claude's")
     ss.add_argument("-n", type=int, default=30)

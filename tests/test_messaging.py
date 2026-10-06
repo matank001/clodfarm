@@ -135,7 +135,7 @@ def test_the_farm_installs_its_hooks_and_takes_messages(env):
     assert {"type": "command", "command": "say done"} in hooks["Stop"][0]["hooks"], "the person's own hooks stay"
     assert hooks["PostToolBatch"][0]["hooks"][0]["command"] == auth.MAIL_HOOK_CMD
     assert hooks["PostToolUse"] == [{"matcher": "SendMessage", "hooks": [
-        {"type": "command", "command": "clodfarm hook", "timeout": 15}]}], "the old hook is gone"
+        {"type": "command", "command": auth.SENT_HOOK_CMD, "timeout": 15}]}], "the old hook is gone"
     listen = [h for g in hooks["Stop"] for h in g["hooks"] if h["command"] == auth.LISTEN_HOOK_CMD][0]
     assert listen["async"] and listen["asyncRewake"]
     before = (home / "settings.json").stat().st_mtime_ns
@@ -213,6 +213,60 @@ def test_messages_sent_with_claude_codes_own_tool_are_logged(env, store):
                          "tool_response": {"success": False}})
     sent = [e["msg"] for e in store.events() if e["type"] == "msg.sent"]
     assert sent == ["gil -> 260927123456abcdef: rebased, go ahead (live)"]
+
+
+# ------------------------------------------------------------------ the mod
+def mod(action, stdin=None, **env):
+    """`clodfarm hook --mod <action>` as the farm's mod runs it (clodfarm/mod/hooks/register.ts)."""
+    r = subprocess.run([sys.executable, "-m", "clodfarm", "hook", "--mod", action], input=json.dumps(stdin or {}),
+                       capture_output=True, text=True, check=True, env={**os.environ, **env})
+    return json.loads(r.stdout)
+
+
+def test_the_mod_takes_mail_gates_messages_and_logs_them(env, store):
+    flag = env / "flag"
+    store.send_message("gil", "test", "are you around?")
+    flag.touch()
+    got = mod("take", {"how": "wake"}, FARM_MAIL_FLAG=str(flag))
+    assert "are you around?" in got["text"] and "from gil" in got["text"] and not flag.exists()
+    assert mod("take", FARM_MAIL_FLAG=str(flag)) == {"text": ""}, "delivered once"
+    assert mod("send", {"to": "[clodfarm] farm · gil"}) == {"ok": True, "why": ""}
+    store.put_claude("gil", approve_missions=True)
+    refused = mod("send", {"to": "[clodfarm] farm · gil"})
+    assert refused["ok"] is False and "clodfarm msg gil" in refused["why"]
+    assert mod("send", {"to": "gil"}, FARM_OWNER="gil")["ok"], "its own sessions talk freely"
+    mod("sent", {"to": "[clodfarm] farm · noa", "text": "rebased, go ahead"})
+    mod("sent", {"to": "noa", "text": "  "})
+    live = [e["msg"] for e in store.events() if e["type"] == "msg.sent" and e["msg"].endswith("(live)")]
+    assert live == ["test -> noa: rebased, go ahead (live)"]
+
+
+def test_the_shell_hooks_stand_down_where_the_mod_is_live(env):
+    for cmd in (auth.LISTEN_HOOK_CMD, auth.SEND_HOOK_CMD, auth.SENT_HOOK_CMD):
+        live = subprocess.run(["/bin/sh", "-c", cmd], input="{}", capture_output=True, text=True,
+                              env={**os.environ, "FARM_MOD_LIVE": "1", "PATH": "/nonexistent"})
+        assert live.returncode == 0 and live.stdout == live.stderr == "", "nothing starts"
+        alone = subprocess.run(["/bin/sh", "-c", cmd], input="{}", capture_output=True, text=True,
+                               env={**os.environ, "FARM_MOD_LIVE": "", "PATH": "/nonexistent"})
+        assert alone.returncode != 0, "without the mod the shell hook runs (here: no clodfarm on PATH)"
+
+
+def test_the_farm_installs_its_mod_where_claude_code_loads_it(env):
+    home = env / "claude-home"
+    path = auth.install_mod()
+    assert path == str(home / auth.MOD_DIR)
+    manifest = json.load(open(home / auth.MOD_DIR / ".claude-plugin" / "plugin.json"))
+    assert manifest["name"] == "clodfarm"
+    assert json.load(open(home / auth.MOD_DIR / "hooks" / "hooks.json")) == {"modules": ["./register.ts"]}
+    assert not (home / auth.MOD_DIR / "tests").exists(), "its tests stay behind"
+    (home / auth.MOD_DIR / "hooks" / "old.ts").write_text("// an older version's")
+    (home / auth.MOD_DIR / ".claude-plugin" / "types").mkdir()
+    (home / auth.MOD_DIR / ".claude-plugin" / "types" / "x.d.ts").write_text("// Claude Code's")
+    before = (home / auth.MOD_DIR / "hooks" / "register.ts").stat().st_mtime_ns
+    auth.install_mod()
+    assert (home / auth.MOD_DIR / "hooks" / "register.ts").stat().st_mtime_ns == before, "unchanged: not rewritten"
+    assert not (home / auth.MOD_DIR / "hooks" / "old.ts").exists()
+    assert (home / auth.MOD_DIR / ".claude-plugin" / "types" / "x.d.ts").exists(), "what Claude Code laid stays"
 
 
 def test_every_claude_on_a_box_lists_its_sessions_in_one_place(tmp_path):

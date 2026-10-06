@@ -134,13 +134,17 @@ def install_guide(config_dir: str | None = None):
 HOOK_CMD = "clodfarm hook"
 # after every batch of tool calls; the shell test keeps it free (no Python starts) unless mail is waiting
 MAIL_HOOK_CMD = '[ -e "${FARM_MAIL_FLAG:-/nonexistent}" ] && exec clodfarm hook; exit 0'
-LISTEN_HOOK_CMD = "clodfarm hook --listen"
+# the farm's mod (clodfarm/mod, install_mod) sets FARM_MOD_LIVE in the sessions that loaded it: it wakes an idle
+# conversation and gates and logs SendMessage itself, so these stand down there (and stay for a session without it)
+_UNLESS_MOD = '[ -n "${FARM_MOD_LIVE:-}" ] && exit 0; '
+LISTEN_HOOK_CMD = _UNLESS_MOD + "exec clodfarm hook --listen"
 # before every tool call; free (no Python starts) unless this Claude's person turned tools off (policy.py)
 POLICY_HOOK_CMD = ('[ -s "${CLAUDE_CONFIG_DIR:-$HOME/.claude}/farm-policy.json" ] && exec clodfarm hook --policy; '
                    'exit 0')
-SEND_HOOK_CMD = "clodfarm hook --policy"
+SEND_HOOK_CMD = _UNLESS_MOD + "exec clodfarm hook --policy"
+SENT_HOOK_CMD = _UNLESS_MOD + "exec clodfarm hook"
 LISTEN_SECONDS = 600  # an idle conversation is woken for mail this long after its last turn
-_OLD_HOOKS = ("clodfarm inbox --hook",)
+_OLD_HOOKS = ("clodfarm inbox --hook", "clodfarm hook --listen", "clodfarm hook --policy")
 HOOK_EVENTS = ("SessionStart", "UserPromptSubmit", "Stop", "SessionEnd")
 
 
@@ -157,7 +161,8 @@ def farm_hooks() -> dict:
     base = {"type": "command", "command": HOOK_CMD, "timeout": 15}
     out = {event: [{"hooks": [dict(base)]}] for event in HOOK_EVENTS}
     out["PostToolBatch"] = [{"hooks": [{"type": "command", "command": MAIL_HOOK_CMD, "timeout": 15}]}]
-    out["PostToolUse"] = [{"matcher": "SendMessage", "hooks": [dict(base)]}]
+    out["PostToolUse"] = [{"matcher": "SendMessage", "hooks": [{"type": "command", "command": SENT_HOOK_CMD,
+                                                                "timeout": 15}]}]
     out["PreToolUse"] = [{"matcher": "SendMessage", "hooks": [{"type": "command", "command": SEND_HOOK_CMD,
                                                                "timeout": 15}]},
                          {"hooks": [{"type": "command", "command": POLICY_HOOK_CMD, "timeout": 15}]}]
@@ -167,7 +172,7 @@ def farm_hooks() -> dict:
 
 
 def _ours(group: dict) -> bool:
-    cmds = {HOOK_CMD, MAIL_HOOK_CMD, LISTEN_HOOK_CMD, POLICY_HOOK_CMD, SEND_HOOK_CMD, *_OLD_HOOKS}
+    cmds = {HOOK_CMD, MAIL_HOOK_CMD, LISTEN_HOOK_CMD, POLICY_HOOK_CMD, SEND_HOOK_CMD, SENT_HOOK_CMD, *_OLD_HOOKS}
     return any(h.get("command") in cmds for h in group.get("hooks", []))
 
 
@@ -190,6 +195,42 @@ def install_hooks():
     if json.dumps(hooks, sort_keys=True) != before:
         os.makedirs(os.path.dirname(path), exist_ok=True)
         _atomic_write(path, json.dumps(cfg, indent=2))
+
+
+MOD_DIR = "farm-mod"  # in the Claude Code config dir: the farm's mod as this Claude's sessions load it
+
+
+def install_mod() -> str:
+    """Put the farm's mod (the ``mod`` folder of this package: a Claude Code plugin of function hooks) in this Claude's
+    config dir and return its path, for CLAUDE_CODE_PLUGIN_DIRS. Only what changed is written, so the sessions
+    watching it reload only for a new version; its tests stay behind."""
+    src = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mod")
+    dst = os.path.join(claude_home(), MOD_DIR)
+    want = set()
+    for root, dirs, files in os.walk(src):
+        dirs[:] = [d for d in dirs if d not in ("tests", "node_modules", "__pycache__")]
+        for name in files:
+            rel = os.path.relpath(os.path.join(root, name), src)
+            want.add(rel)
+            new = open(os.path.join(src, rel), "rb").read()
+            path = os.path.join(dst, rel)
+            try:
+                if open(path, "rb").read() == new:
+                    continue
+            except OSError:
+                pass
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            tmp = path + ".tmp"
+            with open(tmp, "wb") as f:
+                f.write(new)
+            os.replace(tmp, path)
+    engine = (os.path.join(".claude-plugin", "types") + os.sep, "tsconfig.json")  # what Claude Code lays beside it
+    for root, _dirs, files in os.walk(dst):  # what an older version had and this one doesn't
+        for name in files:
+            rel = os.path.relpath(os.path.join(root, name), dst)
+            if rel not in want and not rel.startswith(engine[0]) and rel != engine[1]:
+                os.remove(os.path.join(root, name))
+    return dst
 
 
 def install_messaging():

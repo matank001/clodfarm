@@ -1,5 +1,20 @@
 # Changelog
 
+## 1.12.0 (2026-10-06)
+
+- **The farm's mod.** Every Claude Code session on the farm loads a plugin of function hooks (`clodfarm/mod`, put in
+  each Claude's config dir and named in `CLAUDE_CODE_PLUGIN_DIRS`) that does the messaging a shell hook did poorly:
+  - **An idle conversation is woken for its mail from inside the session**, with a turn of its own: no more
+    `clodfarm hook --listen` process polling for 10 minutes after every turn (and Claude Code waiting up to 30 s for
+    it when a session ended), and any conversation is woken, not only Remote Control ones.
+  - **`SendMessage` is gated and logged where Claude Code sends it** (`session.send`): messages from the main loop,
+    its agents and other plugins alike. One to a Claude whose person approves everything is turned away with the
+    tool's own error, and only a delivered one is logged.
+  - **A `msg` tool** (`mcp__clodfarm__msg`): `clodfarm msg` for the model, even where Bash is turned off.
+
+  A session that loaded it carries `FARM_MOD_LIVE`, and the settings hooks' shell versions of those steps stand down
+  there; without it (an older Claude Code, or `FARM_MOD=0`) they work as before. See docs/agents.md.
+
 ## 1.11.1 (2026-10-03)
 
 - List prices for the newest models, so a bot on them is counted at its real cost: gpt-6.1-sol ($2 in, $10 out per

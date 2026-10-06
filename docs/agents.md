@@ -43,8 +43,9 @@ A `clodfarm msg` is handed over exactly once, by the first of:
   seconds; new mail for its conversations or its running sub-agents sets a flag file, and a `PostToolBatch` hook
   hands the mail over (without a flag the hook doesn't even start Python).
 - **Before a turn ends:** the `Stop` hook keeps the turn going with the mail (at most three times in a row).
-- **Waking an idle conversation:** after each turn of a Remote Control conversation (the Claude app,
-  claude.ai/code) an async hook waits up to 10 minutes and wakes it when mail arrives (Claude Code's `asyncRewake`).
+- **Waking an idle conversation:** a conversation whose last turn ended in the last 10 minutes is woken when mail
+  arrives: the farm's mod (below) starts a turn with it. Where the mod isn't loaded, an async hook waits after each
+  turn of a Remote Control conversation (the Claude app, claude.ai/code) and wakes it (Claude Code's `asyncRewake`).
 - **At the next prompt**, as before.
 - **`--urgent`** (a running sub-agent): sub-agents read stream-json on an open stdin (`FARM_LIVE_STDIN`), so the farm
   interrupts it (a running tool is cancelled) and hands the message over as its next turn.
@@ -57,6 +58,26 @@ Every message has an id and a reply address (a sub-agent's is its task id), and 
 `SendMessage` needs the sessions to see each other: every Claude added in the farm UI lists its sessions in the farm's
 own Claude's list (`FARM_SHARE_SESSIONS`), and each Claude takes messages from them without holding them for approval
 (`crossSessionInbound: accept`, unless you set it). Messages from another Claude are never the person's approval.
+
+### The farm's mod
+
+Every session a Claude starts on the farm (Remote Control, its conversations, its sub-agents) also loads **the farm's
+mod**: a Claude Code plugin of function hooks (`clodfarm/mod`), which the farm puts in each Claude's config dir
+(`farm-mod`) and names in `CLAUDE_CODE_PLUGIN_DIRS`. It does from inside the session what a shell hook can't do well:
+
+- **wakes an idle conversation** for its mail (above), with a turn of its own, instead of a process left polling for
+  10 minutes after every turn, which Claude Code also waited up to 30 s for when the session ended; and it does so for
+  any conversation, not only Remote Control ones;
+- **gates and logs `SendMessage`** where Claude Code sends it (`session.send`): every message from the main loop, its
+  own agents and other plugins, not just the tool calls a `PreToolUse` hook sees. One to a Claude whose person
+  approves everything is turned away (send it with `clodfarm msg`, which asks them), and only a delivered one goes in
+  the event log;
+- **gives the model a `msg` tool** (`mcp__clodfarm__msg`): `clodfarm msg` with `to`, `text`, `urgent` and `wake`,
+  which works even where its person turned Bash off.
+
+A session that loaded it carries `FARM_MOD_LIVE=1`, and the settings hooks' shell versions of those steps stand down
+there; a session without it (an older Claude Code, or `FARM_MOD=0`) gets them from the shell hooks as before. A
+long-lived session reloads the mod when an upgrade brings a new one.
 
 ## Limits that keep a swarm sane
 

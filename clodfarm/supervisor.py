@@ -30,7 +30,7 @@ import time
 from . import awsapps, boot, dashboards, feed, gitops, notify, planner, procs, prompts
 from .auth import (accept_remote_control, auth_status, banner, claude_name, install_browser_mcp, install_commands,
                    install_guide,
-                   install_hooks, install_messaging, install_model, seat_id, trust_directory)
+                   install_hooks, install_messaging, install_mod, install_model, seat_id, trust_directory)
 from .config import primary_name_file
 from .config import Config, load
 from .governor import Snapshot, decide
@@ -121,6 +121,7 @@ class Farm:
             install_hooks()
             install_commands()  # /farm-login: its person signs in to it on the farm UI from the Claude app
             install_messaging()
+            self.install_mod()
             install_model(self.cfg.model)
             # the farm's browser as the `browser` MCP tools (its own profiles), when the image has one
             install_browser_mcp(claude=self.cfg.name, unowned=not os.environ.get("FARM_HATCHED"))
@@ -547,6 +548,21 @@ class Farm:
         pct = lambda w: "?" if not w else f"{w.utilization:.0%}"  # noqa: E731
         self.store.event("usage.measured", f"{self.cfg.name}: 5h {pct(sn.five_hour)} used, 7d {pct(sn.seven_day)} used")
         return True
+
+    def install_mod(self):
+        """The farm's mod (clodfarm/mod) in every Claude Code session this Claude starts from here on (Remote Control,
+        its conversations, its sub-agents): it wakes idle conversations for their mail and gates and logs SendMessage
+        from inside the session. A long-lived session reloads it when an upgrade brings a new one. FARM_MOD=0: none."""
+        if os.environ.get("FARM_MOD", "1") == "0":
+            return
+        try:
+            mod = install_mod()
+        except OSError as e:
+            print(f"mod: not installed ({e}); the settings hooks do its work", flush=True)
+            return
+        dirs = [d for d in os.environ.get("CLAUDE_CODE_PLUGIN_DIRS", "").split(os.pathsep) if d and d != mod]
+        os.environ["CLAUDE_CODE_PLUGIN_DIRS"] = os.pathsep.join(dirs + [mod])
+        os.environ["CLAUDE_CODE_PLUGIN_DIR_WATCH"] = "1"
 
     # ------------------------------------------------------------------ mail
     def mail_loop(self):

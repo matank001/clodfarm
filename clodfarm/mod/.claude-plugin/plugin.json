@@ -1,0 +1,9 @@
+{
+  "name": "clodfarm",
+  "version": "0.1.0",
+  "description": "The farm's messaging inside Claude Code: wakes an idle conversation for its mail, gates and logs SendMessage, and gives the model a msg tool",
+  "author": {
+    "name": "clodfarm",
+    "url": "https://github.com/matank001/clodfarm"
+  }
+}
