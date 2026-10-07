@@ -9,6 +9,7 @@
     clodfarm subagents [--all] [--mine] | result ID [--wait] | cancel ID | retry ID
     clodfarm msg NAME|ID TEXT [--urgent] [--wake] | inbox   talk to the other Claudes, sub-agents and connected Claude Codes
     clodfarm connect | connections | disconnect ID   Claude Code on your computer, over MCP (docs/mcp.md)
+    clodfarm attach URL [--only DIR... | --all | --manual] | detach [--all]   your computer's Claude Code sessions, on the farm
     clodfarm schedule add TITLE (--cron "0 9 * * 1-5" [--tz Europe/Berlin] | --every 2h | --at "in 3h") [--prompt TEXT] [--on NAME]
     clodfarm schedule list | remove ID | pause ID | resume ID | run ID
     clodfarm events [-n 30] [-f]      the farm's event log
@@ -428,6 +429,9 @@ def cmd_hook(cfg, a):
     (the Stop blocks with them, so Claude reads them first). It logs messages sent with Claude Code's SendMessage.
     With --listen (in the background after a conversation's turn) it waits for mail and wakes the conversation.
     It never fails the session: any problem is reported on stderr and it exits 0."""
+    if getattr(a, "guest", False):  # on a computer attached to a farm (`clodfarm attach`), not on the farm
+        from .attach import run_hook
+        return run_hook()
     from .prompts import mail_text
     from .sessions import session_kind
     try:
@@ -641,7 +645,7 @@ def cmd_session(cfg, a):
     print(f"{s['id']}  {s.get('kind')}  {s.get('claude')}  {len(turns)} turns  {s.get('title') or ''}")
     for t in turns:
         who = "TOOL" if t["kind"] == "tool_result" else \
-            {"user": "YOU" if s.get("kind") == "conversation" else "FARM", "assistant": "CLAUDE"}.get(t["role"], t["role"])
+            {"user": "YOU" if s.get("kind") in ("conversation", "guest") else "FARM", "assistant": "CLAUDE"}.get(t["role"], t["role"])
         tag = "" if t["kind"] == "text" else f" [{t['kind']}]"
         print(f"\n{who}{tag}: {t['text']}")
     return 0
@@ -1018,6 +1022,16 @@ def cmd_disconnect(cfg, a):
         _store(cfg).event("mcp.disconnected", f"connection {a.id} ended by hand", by=cfg.name)
     print("disconnected: its tokens stop working now" if ok else "no such connection (see `clodfarm connections`)")
     return 0 if ok else 1
+
+
+def cmd_attach(cfg, a):
+    from .attach import cmd_attach as attach
+    return attach(a)
+
+
+def cmd_detach(cfg, a):
+    from .attach import cmd_detach as detach
+    return detach(a)
 
 
 def cmd_pause(cfg, a):
@@ -1625,6 +1639,7 @@ def main(argv=None):
     hk.add_argument("--listen", action="store_true", help=argparse.SUPPRESS)
     hk.add_argument("--policy", action="store_true", help=argparse.SUPPRESS)
     hk.add_argument("--mod", choices=("take", "send", "sent"), help=argparse.SUPPRESS)
+    hk.add_argument("--guest", action="store_true", help=argparse.SUPPRESS)
     ss = add("sessions", cmd_sessions, "every Claude session on the farm (conversations and sub-agents)")
     ss.add_argument("--claude", help="only this Claude's")
     ss.add_argument("-n", type=int, default=30)
@@ -1832,6 +1847,16 @@ def main(argv=None):
         "--url", help="the farm's public URL (default FARM_PUBLIC_URL, else localhost)")
     add("connections", cmd_connections, "the MCP clients connected to this farm")
     add("disconnect", cmd_disconnect, "end an MCP connection").add_argument("id")
+    at = add("attach", cmd_attach, "put this computer's Claude Code sessions on a farm (this folder's, by default)")
+    at.add_argument("url", nargs="?", help="the farm's address (needed the first time)")
+    at.add_argument("--only", nargs="+", metavar="DIR", help="these folders' sessions (default: this folder)")
+    at.add_argument("--all", action="store_true", help="every session (FARM=0 claude leaves one out)")
+    at.add_argument("--manual", action="store_true", help="none by itself: only FARM=1 claude, or /farm in a session")
+    at.add_argument("--name", help="this computer's name on the farm (default: from its host name)")
+    at.add_argument("--status", action="store_true", help="what is connected")
+    de = add("detach", cmd_detach, "stop putting this folder's sessions on the farm (--all: end it all)")
+    de.add_argument("--only", nargs="+", metavar="DIR", help="these folders (default: this folder)")
+    de.add_argument("--all", action="store_true", help="remove the hooks and /farm, and end the connection")
     add("pause", cmd_pause, "pause new work everywhere").add_argument("reason", nargs="*")
     add("resume", cmd_resume, "resume work")
     add("ui", cmd_ui, "serve the farm UI (the daemon also serves it unless FARM_UI=0)").add_argument(

@@ -38,6 +38,53 @@ A connection can never:
 
 Your computer is a **guest** on the farm, not a Claude, so it adds no budget and uses none. Its sub-agents run on the farm's Claudes, under the budget governor like any other. They show on the farm's own Claude's plot, marked `(for <name>)`. A farm Claude answers you with `clodfarm msg <name> "..."`, and you read the answer with `farm_inbox`.
 
+## Put your computer's sessions on the farm (`clodfarm attach`)
+
+The MCP connection lets your Claude Code *use* the farm. `clodfarm attach` also puts your computer's own Claude Code
+sessions *on* it: each one shows under your Claude on the farm as a **LOCAL** session, with its conversation, next to
+the farm's own, and messages the farm's Claudes send your computer arrive in the session itself.
+
+```bash
+pip install git+https://github.com/matank001/clodfarm
+cd ~/code/my-repo && clodfarm attach https://clod.farm/<team>     # signs in once, in your browser
+```
+
+It signs in on the same consent page as `/mcp`, so be signed in to your Claude on the farm (MY CLAUDE) in that browser.
+Then it adds one hook to Claude Code's user settings (`~/.claude/settings.json`, other hooks are kept) and a `/farm`
+command.
+
+**Which sessions go on the farm.** None by default. You choose, and the first rule that applies decides:
+
+| | How | |
+|---|---|---|
+| 1 | `/farm` · `/farm off` · `/farm status` typed in a session | that session, from now on. The hook takes the command; it never reaches the model |
+| 2 | `FARM=1 claude` · `FARM=0 claude` | that session |
+| 3 | `clodfarm attach --all` | every session |
+| 4 | `clodfarm attach` in a folder, or `--only DIR ...` | sessions started in those folders, or inside them |
+
+`clodfarm attach --manual` connects nothing by itself (only rules 1 and 2), `clodfarm attach --status` shows what's
+on, `clodfarm detach` stops a folder (`--only DIR`), and `clodfarm detach --all` removes the hooks and `/farm` and ends
+the connection. Folder and `FARM=` changes apply to new sessions; `/farm` works in a running one.
+
+**What is sent.** For a connected session, the hook sends what's new in its conversation each time a session starts,
+at each prompt, when a turn ends and when it ends: your messages, Claude's replies, and each tool call and result in
+short (as the farm keeps its own sessions). Thinking isn't sent. Secrets are scrubbed on your computer first (anything
+shaped like a key, a token, an email address or a card number). A session that isn't connected sends nothing.
+`/farm` sends the conversation so far; `/farm off` and then `/farm` again keeps what was said in between on your
+computer.
+
+**What it doesn't change.** The session still runs on your computer, on your own Claude account: the farm's budget
+governor doesn't pace it, and it counts for no one's budget. A farm that is down or slow costs a session a few seconds
+at most; what couldn't be sent waits in `~/.config/clodfarm` and goes with the next report.
+
+**Messages.** The farm's Claudes reach your computer with `clodfarm msg <its name> "..."`, as before. In an attached
+session the message arrives at your next prompt, or before Claude ends its turn. Unlike a Remote Control
+conversation, an idle terminal session isn't woken for it.
+
+Under the hood: the hook (`clodfarm hook --guest`) posts to the farm's `/mcp/hook` with the connection's token
+(refreshed under a lock, since refresh tokens rotate). The farm records the session as kind `guest`, `runs_on` your
+computer's name, under the Claude whose person approved the connection. A computer can only write its own sessions.
+
 ## How it's secured
 
 - **OAuth 2.1** with the MCP authorization flow:

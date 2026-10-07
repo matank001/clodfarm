@@ -200,6 +200,11 @@ Claude Code gets a token for this farm only (OAuth 2.1 + PKCE; `clodfarm disconn
 "what's the farm doing?", "have the farm add CSV export, on gil", "tell noa the release is out".
 See [docs/mcp.md](docs/mcp.md).
 
+To put your computer's own Claude Code sessions **on** the farm too (each one shows under your Claude, and the farm's
+Claudes can message it), run `clodfarm attach https://<your farm>` in a repo: sessions started there connect. Or
+connect all of them with `--all`, or one at a time with `/farm` inside a session or `FARM=1 claude`.
+See [docs/mcp.md](docs/mcp.md#put-your-computers-sessions-on-the-farm-clodfarm-attach).
+
 <a name="deploy"></a>
 <h2><img src="assets/readme/deploy.png" height="44" alt="Deploy"></h2>
 

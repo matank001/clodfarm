@@ -2268,7 +2268,7 @@ const UI = {
       rows = rows.filter(s => task ? s.task === task : s.kind !== "usage");
       if (!rows.length) return fill(box, h("p", { class: "muted small", text: task ? "Its session is recorded once it starts." : "No sessions recorded yet. Talk to it in the Claude app: every conversation shows up here." }));
       fill(box, h("ul", { class: "subs" }, rows.slice(0, 8).map(s => h("li", {},
-        h("span", { class: `badge ${s.kind === "conversation" ? "done" : "running"}`, text: s.kind === "conversation" ? "TALK" : "SUB-AGENT" }),
+        h("span", { class: `badge ${s.kind === "sub-agent" ? "running" : "done"}`, text: s.kind === "conversation" ? "TALK" : s.kind === "guest" ? "LOCAL" : "SUB-AGENT" }),
         h("a", { href: "#", onclick: (e) => { e.preventDefault(); this.openSession(s.id, this.summaryKey); } }, (s.title || "(untitled)").slice(0, 70)),
         h("span", { class: "muted", text: ` · ${s.turns || 0} turns · ${ago(s.last_at)}` })))));
     };
@@ -2286,9 +2286,10 @@ const UI = {
     $("#dlg-talk").showModal();
     let s;
     try { s = await api(`api/sessions/${id}`); } catch (x) { fill($("#talk-body"), h("p", { class: "form-error", text: x.message })); return; }
-    $("#talk-kicker").textContent = `${s.kind === "conversation" ? "CONVERSATION" : "SUB-AGENT SESSION"} · ${String(s.claude || "").toUpperCase()} · ${ago(s.started)}`;
+    const local = s.kind === "guest";  // a Claude Code session on its person's own computer (`clodfarm attach`)
+    $("#talk-kicker").textContent = `${s.kind === "conversation" ? "CONVERSATION" : local ? "LOCAL SESSION" : "SUB-AGENT SESSION"} · ${String((local ? s.runs_on : s.claude) || "").toUpperCase()} · ${ago(s.started)}`;
     $("#talk-h").textContent = (s.title || "(untitled)").slice(0, 90);
-    const who = (t) => t.kind === "tool_result" ? "TOOL" : t.role === "assistant" ? String(s.claude || "CLAUDE").toUpperCase() : s.kind === "conversation" ? "YOU" : "THE FARM";
+    const who = (t) => t.kind === "tool_result" ? "TOOL" : t.role === "assistant" ? (local ? "CLAUDE" : String(s.claude || "CLAUDE").toUpperCase()) : s.kind === "conversation" || local ? "YOU" : "THE FARM";
     fill($("#talk-body"), s.conversation.length ? s.conversation.map(t => h("div", { class: `turn ${t.role} k-${t.kind}` },
       h("b", { text: who(t) + (t.kind === "tool" ? " · TOOL CALL" : "") }), h("div", { text: t.text }))) : h("p", { class: "muted", text: "Nothing said yet." }));
   },

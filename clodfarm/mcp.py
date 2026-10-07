@@ -175,15 +175,17 @@ class OAuthStore:
         g["refresh"], g["refresh_exp"], g["refreshed"] = _h(refresh), t + REFRESH_TTL, int(t)
         self._save()
         return {"access_token": access, "token_type": "Bearer", "expires_in": ACCESS_TTL,
-                "refresh_token": refresh, "scope": g["scope"]}
+                "refresh_token": refresh, "scope": g["scope"], "name": g["name"]}
 
-    def grant(self, client_id: str, name: str, scope: str, resource: str) -> dict:
+    def grant(self, client_id: str, name: str, scope: str, resource: str, owner: str | None = None) -> dict:
+        """A new connection. ``owner``: the farm Claude whose person approved it (their computer's sessions show
+        under that Claude)."""
         with self._lock:
             self._prune()
             gid = "c-" + secrets.token_hex(3)
             c = self.client(client_id) or {}
             self.data["grants"][gid] = {"id": gid, "client_id": client_id, "client_name": c.get("client_name", "?"),
-                                        "name": name, "scope": scope, "resource": resource,
+                                        "name": name, "scope": scope, "resource": resource, "owner": owner,
                                         "created": int(time.time()), "last_used": None,
                                         "refresh": "", "refresh_exp": time.time() + REFRESH_TTL}
             return self._issue(gid)
@@ -241,7 +243,7 @@ class OAuthStore:
         return ok
 
     def connections(self) -> list[dict]:
-        keep = ("id", "name", "client_name", "scope", "created", "last_used")
+        keep = ("id", "name", "client_name", "scope", "owner", "created", "last_used")
         return [{k: g.get(k) for k in keep} for g in sorted(self.data["grants"].values(), key=lambda g: g["created"])]
 
 
@@ -477,6 +479,58 @@ def rpc(ui, grant: dict, msg: dict):
     return err(-32601, f"method not found: {method}")
 
 
+# ============================================================ guest sessions
+SID_RE = re.compile(r"^[A-Za-z0-9-]{8,64}$")
+GUEST_EVENTS = ("SessionStart", "UserPromptSubmit", "Stop", "SessionEnd", "Connect", "Disconnect")
+MAX_GUEST_TURNS = 400  # per report; `clodfarm attach` sends a long conversation in several
+
+
+def _guest_turns(raw) -> list[dict]:
+    from .sessions import MAX_TEXT, _clip
+    if not isinstance(raw, list) or len(raw) > MAX_GUEST_TURNS:
+        raise ValueError(f"turns must be a list of at most {MAX_GUEST_TURNS}")
+    out = []
+    for t in raw:
+        if not isinstance(t, dict) or t.get("role") not in ("user", "assistant") or \
+                t.get("kind") not in ("text", "tool", "tool_result") or not isinstance(t.get("text"), str):
+            raise ValueError("a turn is {role: user|assistant, kind: text|tool|tool_result, text, at}")
+        out.append({"role": t["role"], "kind": t["kind"], "text": _clip(t["text"], MAX_TEXT),
+                    "at": str(t["at"])[:40] if t.get("at") else None})
+    return out
+
+
+def guest_report(store, grant: dict, body: dict) -> tuple[int, dict]:
+    """A Claude Code session on a connected computer reports itself (`clodfarm attach`'s hook): the session and its
+    new turns go in the farm's store as a ``guest`` session of that computer, shown under the farm Claude whose person
+    connected it, and the messages waiting for the computer's name come back (``mail``) when it asks for them.
+
+    A computer only ever writes its own sessions: a session id the farm already holds for anyone else is refused.
+    Its tokens count for nobody's budget (the session runs on the computer's own Claude account)."""
+    from .prompts import mail_text
+    name = grant["name"]
+    sid, event = str(body.get("session") or ""), str(body.get("event") or "")
+    if not SID_RE.match(sid) or event not in GUEST_EVENTS:
+        return 400, {"error": "session (its Claude Code session id) and event are required"}
+    try:
+        turns = _guest_turns(body.get("turns") or [])
+    except ValueError as e:
+        return 400, {"error": str(e)}
+    had = store.session(sid)
+    if had and (had.get("kind") != "guest" or had.get("runs_on") != name):
+        return 403, {"error": "that session isn't this computer's"}
+    ended = event in ("SessionEnd", "Disconnect")
+    title = str(body.get("title") or "")[:120] or None
+    store.record_session(sid, turns=turns, claude=grant.get("owner") or name, runs_on=name, kind="guest", box=name,
+                         cwd=str(body.get("cwd") or "")[:500] or None, title=title,
+                         busy=True if event == "UserPromptSubmit" else False if event in ("Stop", "SessionEnd") else None,
+                         ended=True if ended else False if event in ("SessionStart", "Connect") else None,
+                         end_reason=str(body.get("reason") or event)[:80] if ended else None)
+    if not had:
+        store.event("session.guest", f"{name} connected a Claude Code session to the farm", by=name)
+    mail = store.claim(name, f"{event.lower()}:{name}") if body.get("mail") and not ended else []
+    return 200, {"ok": True, "session": sid, "name": name, "turns": len(turns), "mail": mail_text(mail) if mail else ""}
+
+
 # =================================================================== HTTP glue
 def public_url(handler, base: str) -> str:
     """The farm's public URL: FARM_PUBLIC_URL (behind a proxy that rewrites Host, like CloudFront), else from Host."""
@@ -588,7 +642,7 @@ def token_response(oa: OAuthStore, form: dict, pub: str) -> tuple[int, dict]:
             return 400, {"error": "invalid_grant", "error_description": "PKCE check failed"}
         if form.get("resource") and form["resource"].rstrip("/") not in (pub + "/mcp", pub):
             return 400, {"error": "invalid_target"}
-        return 200, oa.grant(c["client_id"], c["name"], c["scope"], pub + "/mcp")
+        return 200, oa.grant(c["client_id"], c["name"], c["scope"], pub + "/mcp", owner=c.get("owner"))
     if gt == "refresh_token":
         out = oa.refresh(form.get("refresh_token", ""), form.get("client_id", ""))
         return (200, out) if out else (400, {"error": "invalid_grant"})

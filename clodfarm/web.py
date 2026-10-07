@@ -861,7 +861,7 @@ def make_handler(ui: FarmUI):
                     return self._json({}, 200, nostore)
                 if path == "/oauth/authorize":
                     return self._authorize_post(self._form())
-                return self._mcp()
+                return self._mcp(hook=path == "/mcp/hook")
             except (BrokenPipeError, ConnectionResetError):
                 pass
             except ValueError as e:
@@ -888,12 +888,14 @@ def make_handler(ui: FarmUI):
                 return self._consent({**p, "name": name}, f"'{name}' is a Claude on the farm: pick another name")
             scope = "farm:read" if f.get("access") == "read" else p["scope"]
             code = ui.oauth.new_code(client_id=p["client_id"], redirect_uri=p["redirect_uri"],
-                                     challenge=p["code_challenge"], scope=scope, name=name)
+                                     challenge=p["code_challenge"], scope=scope, name=name, owner=self._who().owner)
             ui.store.event("mcp.connected", f"{name} connected over MCP ({ui.oauth.client(p['client_id'])['client_name']},"
                            f" {scope})", by="ui")
             return self._redirect(mcp.redirect_with(p["redirect_uri"], code=code, state=p["state"], iss=self._pub()))
 
-        def _mcp(self):
+        def _mcp(self, hook: bool = False):
+            """The MCP endpoint (JSON-RPC), or with ``hook`` a connected computer's session reporting itself
+            (`clodfarm attach`, see mcp.guest_report). Both take the connection's bearer token."""
             pub = self._pub()
             origin = self.headers.get("Origin")
             po = urlsplit(pub)
@@ -912,6 +914,9 @@ def make_handler(ui: FarmUI):
                 msg = self._body()
             except ValueError:
                 return self._json({"jsonrpc": "2.0", "id": None, "error": {"code": -32700, "message": "parse error"}}, 400)
+            if hook:
+                status, out = mcp.guest_report(ui.store, grant, msg)
+                return self._json(out, status, {"Cache-Control": "no-store"})
             if not msg.get("method"):
                 self._headers(202, "application/json", None, 0)  # a response or notification from the client
                 return
@@ -1127,7 +1132,7 @@ def make_handler(ui: FarmUI):
                     s = ui.store.session(m.group(1))
                     if not s or not who.owns(s.get("claude")):
                         return self._err(404, "no such session")
-                    return self._json({"id": s["id"], "claude": s.get("claude"), "kind": s.get("kind"),
+                    return self._json({"id": s["id"], "claude": s.get("claude"), "runs_on": s.get("runs_on"), "kind": s.get("kind"),
                                        "title": s.get("title"), "task": s.get("task"), "started": s.get("started"),
                                        "conversation": [{k: t.get(k) for k in ("role", "kind", "text", "at")}
                                                         for t in ui.store.turns(s["id"])]})
@@ -1338,7 +1343,7 @@ def make_handler(ui: FarmUI):
         def do_POST(self):
             path = self._path() or ""
             try:
-                if path in ("/mcp", "/oauth/register", "/oauth/token", "/oauth/revoke", "/oauth/authorize"):
+                if path in ("/mcp", "/mcp/hook", "/oauth/register", "/oauth/token", "/oauth/revoke", "/oauth/authorize"):
                     return self._oauth_post(path)  # bearer tokens and OAuth forms: no cookie, no X-Clodfarm
                 if self.headers.get("X-Clodfarm") != "1" or \
                         not (self.headers.get("Content-Type") or "").startswith("application/json"):

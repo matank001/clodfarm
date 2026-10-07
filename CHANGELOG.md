@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+- **Your computer's own Claude Code sessions, on the farm: `clodfarm attach`.** Until now only the farm's own
+  sessions were on it, and a computer could only use the farm over MCP. `clodfarm attach https://<farm>` signs the
+  computer in on the MCP consent page and adds one hook and a `/farm` command to Claude Code's user settings. A
+  connected session shows under its person's Claude as a LOCAL session with its whole conversation (scrubbed of
+  secrets on the computer). Messages for the computer arrive at its next prompt or before a turn ends. You choose which
+  sessions connect: the folders you attach (the default is the one you run it in), `--all`, `FARM=1`/`FARM=0 claude`,
+  or `/farm` / `/farm off` in a running session. `clodfarm detach [--all]` undoes it. On the farm: `POST /mcp/hook`
+  takes a connection's own sessions only, and a connection now remembers the Claude whose person approved it. See
+  docs/mcp.md.
+
 ## 1.12.0 (2026-10-06)
 
 - **The farm's mod.** Every Claude Code session on the farm loads a plugin of function hooks (`clodfarm/mod`, put in
