@@ -11,6 +11,12 @@
   or `/farm` / `/farm off` in a running session. `clodfarm detach [--all]` undoes it. On the farm: `POST /mcp/hook`
   takes a connection's own sessions only, and a connection now remembers the Claude whose person approved it. See
   docs/mcp.md.
+- **The `farm` plugin: the same, with nothing to install.** `/plugin marketplace add matank001/clodfarm`, then
+  `/plugin install farm@clodfarm`, then `/farm connect https://<farm>` in a session: the browser opens once (the sign-in
+  runs beside the session, which goes on the farm when it's done), and the plugin refreshes its token by itself after
+  that. `/farm`, `/farm off`, `/farm status`, `/farm folder [off]`, `/farm everywhere [off]` and `/farm sign-out` do
+  the rest. It needs only `python3` (macOS's own 3.9 is enough) and leaves your settings alone. It carries a copy of
+  the hook's code (`scripts/sync-plugin.sh`; the tests check the copy).
 
 ## 1.12.0 (2026-10-06)
 

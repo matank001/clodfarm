@@ -38,33 +38,45 @@ A connection can never:
 
 Your computer is a **guest** on the farm, not a Claude, so it adds no budget and uses none. Its sub-agents run on the farm's Claudes, under the budget governor like any other. They show on the farm's own Claude's plot, marked `(for <name>)`. A farm Claude answers you with `clodfarm msg <name> "..."`, and you read the answer with `farm_inbox`.
 
-## Put your computer's sessions on the farm (`clodfarm attach`)
+## Put your computer's sessions on the farm (the `farm` plugin)
 
-The MCP connection lets your Claude Code *use* the farm. `clodfarm attach` also puts your computer's own Claude Code
+The MCP connection lets your Claude Code *use* the farm. The `farm` plugin also puts your computer's own Claude Code
 sessions *on* it: each one shows under your Claude on the farm as a **LOCAL** session, with its conversation, next to
 the farm's own, and messages the farm's Claudes send your computer arrive in the session itself.
 
-```bash
-pip install git+https://github.com/matank001/clodfarm
-cd ~/code/my-repo && clodfarm attach https://clod.farm/<team>     # signs in once, in your browser
+In Claude Code:
+
+```
+/plugin marketplace add matank001/clodfarm
+/plugin install farm@clodfarm
+/farm connect https://clod.farm/<team>
 ```
 
-It signs in on the same consent page as `/mcp`, so be signed in to your Claude on the farm (MY CLAUDE) in that browser.
-Then it adds one hook to Claude Code's user settings (`~/.claude/settings.json`, other hooks are kept) and a `/farm`
-command.
+`/farm connect` opens the farm's consent page (the same as `/mcp`'s) in your browser: be signed in to your Claude on the
+farm (MY CLAUDE) there, and allow it. The session you typed it in goes on the farm once it's connected. That is the
+only time a browser is needed: the plugin refreshes its token by itself, and asks you to connect again only if the
+connection ends (30 days without a connected session, or the computer disconnected on the farm). The plugin needs
+nothing installed but `python3` (macOS's own is enough).
 
 **Which sessions go on the farm.** None by default. You choose, and the first rule that applies decides:
 
 | | How | |
 |---|---|---|
-| 1 | `/farm` · `/farm off` · `/farm status` typed in a session | that session, from now on. The hook takes the command; it never reaches the model |
+| 1 | `/farm` · `/farm off` in a session | that session, from now on. The hook takes the command; it never reaches the model |
 | 2 | `FARM=1 claude` · `FARM=0 claude` | that session |
-| 3 | `clodfarm attach --all` | every session |
-| 4 | `clodfarm attach` in a folder, or `--only DIR ...` | sessions started in those folders, or inside them |
+| 3 | `/farm everywhere` (`/farm everywhere off`) | every session |
+| 4 | `/farm folder` (`/farm folder off`) | sessions started in this session's folder, or inside it |
 
-`clodfarm attach --manual` connects nothing by itself (only rules 1 and 2), `clodfarm attach --status` shows what's
-on, `clodfarm detach` stops a folder (`--only DIR`), and `clodfarm detach --all` removes the hooks and `/farm` and ends
-the connection. Folder and `FARM=` changes apply to new sessions; `/farm` works in a running one.
+`/farm status` says whether this session is on and why, `/farm sign-out` ends the computer's connection, and
+`/farm help` lists it all. Folder, everywhere and `FARM=` apply to new sessions; `/farm` works in a running one.
+
+**Without the plugin**, with clodfarm installed (`pip install git+https://github.com/matank001/clodfarm`):
+`clodfarm attach https://<farm>` connects the computer and puts the same hook in Claude Code's user settings
+(`~/.claude/settings.json`, other hooks are kept) with a `/farm` command. `attach` in a folder (or `--only DIR ...`)
+is rule 4, `--all` is rule 3, `--manual` connects nothing by itself, `--status` shows what's on, `clodfarm detach`
+stops a folder, and `clodfarm detach --all` removes the hook and `/farm` and ends the connection. Use one or the
+other, not both. The plugin is easier: nothing to install, it doesn't touch your settings, and `/plugin update`
+updates it.
 
 **What is sent.** For a connected session, the hook sends what's new in its conversation each time a session starts,
 at each prompt, when a turn ends and when it ends: your messages, Claude's replies, and each tool call and result in
@@ -76,6 +88,11 @@ computer.
 **What it doesn't change.** The session still runs on your computer, on your own Claude account: the farm's budget
 governor doesn't pace it, and it counts for no one's budget. A farm that is down or slow costs a session a few seconds
 at most; what couldn't be sent waits in `~/.config/clodfarm` and goes with the next report.
+
+**For clodfarm's own developers:** the plugin (`plugins/farm`, listed in `.claude-plugin/marketplace.json`) carries a
+copy of `clodfarm/attach.py`, `sessions.py` and `scrub.py`, since an installed plugin can't reach outside its folder.
+Run `scripts/sync-plugin.sh` after changing them or the version; the tests fail while the copy differs. That code
+must run on Python 3.9.
 
 **Messages.** The farm's Claudes reach your computer with `clodfarm msg <its name> "..."`, as before. In an attached
 session the message arrives at your next prompt, or before Claude ends its turn. Unlike a Remote Control

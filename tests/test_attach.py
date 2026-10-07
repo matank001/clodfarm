@@ -272,3 +272,111 @@ def test_install_keeps_other_hooks_and_detach_removes_ours(laptop, tmp_path):
     cfg = json.load(open(os.path.join(home, "settings.json")))
     assert cfg["hooks"] == {"Stop": [mine]} and not os.path.exists(os.path.join(home, "commands", "farm.md"))
     assert attach.load_conf() == {} and ui.oauth.connections() == []  # the farm ended the connection too
+
+
+# ------------------------------------------------------------------------ the plugin
+ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+PLUGIN = os.path.join(ROOT, "plugins", "farm")
+FAKE_BROWSER = '''
+import os, re, sys, traceback, urllib.error, urllib.parse, urllib.request
+sys.excepthook = lambda *e: open(os.environ["FAKE_LOG"], "w").write("".join(traceback.format_exception(*e)))
+class NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):
+        return None
+step = lambda m: open(os.environ["FAKE_LOG"] + ".steps", "a").write(m + "\\n")
+step("started")
+url, ck = sys.argv[1], {"Cookie": os.environ["FAKE_COOKIE"]}
+page = urllib.request.urlopen(urllib.request.Request(url, headers=ck)).read().decode()
+fields = {k: v.replace("&amp;", "&") for k, v in re.findall(r'<input type="hidden" name="([a-z_]+)" value="([^"]*)"', page)}
+fields.update(decision="allow", access="work",
+              name=re.search(r'id="name" name="name" type="text" value="([^"]*)"', page).group(1))
+base = url.split("/oauth/authorize")[0]
+step("page read")
+try:
+    urllib.request.build_opener(NoRedirect).open(urllib.request.Request(
+        base + "/oauth/authorize", urllib.parse.urlencode(fields).encode(), ck))
+except urllib.error.HTTPError as e:
+    step("allowed " + str(e.code))
+    urllib.request.urlopen(e.headers["Location"]).read()
+    step("called back")
+'''
+
+
+def test_the_plugin_carries_the_same_code():
+    for f in ("__init__.py", "attach.py", "sessions.py", "scrub.py"):
+        assert open(os.path.join(ROOT, "clodfarm", f)).read() == open(os.path.join(PLUGIN, "lib", "clodfarm", f)).read(), \
+            f"plugins/farm/lib/clodfarm/{f} is behind: run scripts/sync-plugin.sh"
+    from clodfarm import __version__
+    assert json.load(open(os.path.join(PLUGIN, ".claude-plugin", "plugin.json")))["version"] == __version__
+    hooks = json.load(open(os.path.join(PLUGIN, "hooks", "hooks.json")))["hooks"]
+    assert set(hooks) == set(attach.HOOK_EVENTS)
+    market = json.load(open(os.path.join(ROOT, ".claude-plugin", "marketplace.json")))
+    assert [p["source"] for p in market["plugins"]] == ["./plugins/farm"]
+
+
+PYTHONS = [p for p in ("python3", "/usr/bin/python3") if p == "python3" or os.path.exists(p)]
+
+
+@pytest.mark.parametrize("python", PYTHONS)  # macOS's own python3 is 3.9
+def test_the_plugins_hook_runs_on_its_own(laptop, tmp_path, python):
+    base, ui, repo = laptop
+    t = Transcript(tmp_path / "s.jsonl")
+    t.say("user", "from the plugin")
+    py = os.path.realpath(os.sys.executable) if python == "python3" else python
+    run = lambda e, **env: subprocess.run([py, os.path.join(PLUGIN, "hooks", "farm.py")], input=json.dumps(e),  # noqa: E731
+                                          capture_output=True, text=True, env={**os.environ, **env}, timeout=60,
+                                          cwd=str(tmp_path))
+    p = run(ev("SessionStart", t, repo), FARM="1")
+    assert p.returncode == 0 and p.stdout.startswith("[farm]"), p.stderr
+    assert texts(ui) == ["from the plugin"]
+    p = run(ev("UserPromptSubmit", t, repo, prompt="/farm:farm status"), FARM="1")  # the plugin's own name for it
+    assert "is on the farm" in json.loads(p.stdout)["reason"], p.stderr
+
+
+def test_slash_farm_connect_signs_in_from_the_session(farm, tmp_path, monkeypatch):  # noqa: F811
+    base, ui = farm
+    monkeypatch.setenv("CLODFARM_HOME", str(tmp_path / "laptop"))
+    monkeypatch.delenv("FARM", raising=False)
+    script = tmp_path / "browser.py"
+    script.write_text(FAKE_BROWSER)
+    monkeypatch.setenv("BROWSER", f"{os.sys.executable} {script} %s")  # the person allows it in their browser
+    monkeypatch.setenv("FAKE_COOKIE", SIGNED_IN["cookie"])
+    monkeypatch.setenv("FAKE_LOG", str(tmp_path / "browser.log"))
+    t = Transcript(tmp_path / "s.jsonl")
+    t.say("user", "before connecting")
+    farm_cmd = lambda text: json.loads(attach.hook(ev("UserPromptSubmit", t, tmp_path, prompt=text), env={}))["reason"]  # noqa: E731
+    assert "isn't connected to a farm yet" in farm_cmd("/farm")
+    assert attach.hook(ev("Stop", t, tmp_path), env={}) is None
+    out = farm_cmd(f"/farm connect {base} sahar-laptop")
+    assert "Opening the farm in your browser" in out
+    end = time.time() + 30
+    while not attach.load_conf().get("refresh") and time.time() < end:
+        time.sleep(0.2)
+    conf = attach.load_conf()
+    log = tmp_path / "browser.log"
+    assert conf.get("name") == "sahar-laptop", (attach.sign_in_state(), log.exists() and log.read_text(),
+                                                open(os.path.join(attach.home(), "signin.log")).read(),
+                                                os.path.exists(str(log) + ".steps") and open(str(log) + ".steps").read())
+    assert conf["url"] == base and attach.sign_in_state()["state"] == "done"
+    assert ui.oauth.check(conf["access"])["owner"] == ui.cfg.name
+    t.say("assistant", "connected")
+    attach.hook(ev("Stop", t, tmp_path), env={})  # the session that connected the computer goes on by itself
+    assert texts(ui) == ["before connecting", "connected"]
+    assert "already connected" in farm_cmd(f"/farm connect {base}")
+
+
+def test_slash_farm_folder_everywhere_and_sign_out(laptop, tmp_path):
+    base, ui, repo = laptop
+    t = Transcript(tmp_path / "s.jsonl")
+    farm_cmd = lambda text, sid=SID: json.loads(  # noqa: E731
+        attach.hook(ev("UserPromptSubmit", t, repo, sid=sid, prompt=text), env={}))["reason"]
+    assert "go on the farm from now on" in farm_cmd("/farm folder")
+    assert attach.load_conf()["folders"] == [os.path.realpath(repo)]
+    assert "started in" in farm_cmd("/farm status", sid="3c6f2a8e-1111-4222-8333-444455556666")
+    assert "stay off the farm" in farm_cmd("/farm folder off") and attach.load_conf()["folders"] == []
+    assert "Every new session" in farm_cmd("/farm everywhere") and attach.load_conf()["everywhere"] is True
+    assert "/farm connect" in farm_cmd("/farm help") and "/farm nonsense?" in farm_cmd("/farm nonsense")
+    assert "Signed out" in farm_cmd("/farm sign-out")
+    conf = attach.load_conf()
+    assert conf == {"folders": [], "everywhere": True} and ui.oauth.connections() == []
+    assert "isn't connected to a farm yet" in farm_cmd("/farm")

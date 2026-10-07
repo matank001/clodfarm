@@ -1,0 +1,15 @@
+{
+  "name": "clodfarm",
+  "description": "clodfarm's Claude Code plugins: put your computer's sessions on your farm",
+  "owner": {
+    "name": "clodfarm"
+  },
+  "plugins": [
+    {
+      "name": "farm",
+      "source": "./plugins/farm",
+      "description": "Put this computer's Claude Code sessions on your clodfarm farm: /farm connect https://<farm>, then /farm in a session, or every session of a folder",
+      "category": "productivity"
+    }
+  ]
+}

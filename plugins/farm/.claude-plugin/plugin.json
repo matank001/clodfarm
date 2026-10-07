@@ -1,0 +1,11 @@
+{
+  "name": "farm",
+  "version": "1.12.0",
+  "description": "Put this computer's Claude Code sessions on your clodfarm farm: each shows under your Claude there, and the farm's Claudes can message it",
+  "author": {
+    "name": "clodfarm",
+    "url": "https://github.com/matank001/clodfarm"
+  },
+  "homepage": "https://github.com/matank001/clodfarm/blob/main/docs/mcp.md",
+  "license": "MIT"
+}
