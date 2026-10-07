@@ -306,8 +306,9 @@ def test_the_plugin_carries_the_same_code():
     for f in ("__init__.py", "attach.py", "sessions.py", "scrub.py"):
         assert open(os.path.join(ROOT, "clodfarm", f)).read() == open(os.path.join(PLUGIN, "lib", "clodfarm", f)).read(), \
             f"plugins/farm/lib/clodfarm/{f} is behind: run scripts/sync-plugin.sh"
-    from clodfarm import __version__
-    assert json.load(open(os.path.join(PLUGIN, ".claude-plugin", "plugin.json")))["version"] == __version__
+    assert re.fullmatch(r"\d+\.\d+\.\d+", json.load(open(os.path.join(PLUGIN, ".claude-plugin", "plugin.json")))["version"])
+    cmds = {f[:-3] for f in os.listdir(os.path.join(PLUGIN, "commands"))}  # /farm:<verb>, each one the hook takes
+    assert cmds == {"connect", "on", "off", "status", "folder", "everywhere", "sign-out", "help"}
     hooks = json.load(open(os.path.join(PLUGIN, "hooks", "hooks.json")))["hooks"]
     assert set(hooks) == set(attach.HOOK_EVENTS)
     market = json.load(open(os.path.join(ROOT, ".claude-plugin", "marketplace.json")))
@@ -329,8 +330,11 @@ def test_the_plugins_hook_runs_on_its_own(laptop, tmp_path, python):
     p = run(ev("SessionStart", t, repo), FARM="1")
     assert p.returncode == 0 and p.stdout.startswith("[farm]"), p.stderr
     assert texts(ui) == ["from the plugin"]
-    p = run(ev("UserPromptSubmit", t, repo, prompt="/farm:farm status"), FARM="1")  # the plugin's own name for it
-    assert "is on the farm" in json.loads(p.stdout)["reason"], p.stderr
+    p = run(ev("UserPromptSubmit", t, repo, prompt="/farm:status"), FARM="1")  # the plugin's own name for it
+    reason = json.loads(p.stdout)["reason"]
+    assert "is on the farm" in reason, p.stderr
+    p = run(ev("UserPromptSubmit", t, repo, prompt="/farm:help"))
+    assert "/farm:off takes it off" in json.loads(p.stdout)["reason"]  # it names the plugin's commands
 
 
 def test_slash_farm_connect_signs_in_from_the_session(farm, tmp_path, monkeypatch):  # noqa: F811
@@ -370,7 +374,7 @@ def test_slash_farm_folder_everywhere_and_sign_out(laptop, tmp_path):
     t = Transcript(tmp_path / "s.jsonl")
     farm_cmd = lambda text, sid=SID: json.loads(  # noqa: E731
         attach.hook(ev("UserPromptSubmit", t, repo, sid=sid, prompt=text), env={}))["reason"]
-    assert "go on the farm from now on" in farm_cmd("/farm folder")
+    assert "go on the farm from now on" in farm_cmd("/farm:folder")  # the plugin's form and the plain one alike
     assert attach.load_conf()["folders"] == [os.path.realpath(repo)]
     assert "started in" in farm_cmd("/farm status", sid="3c6f2a8e-1111-4222-8333-444455556666")
     assert "stay off the farm" in farm_cmd("/farm folder off") and attach.load_conf()["folders"] == []

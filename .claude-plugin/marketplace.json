@@ -8,7 +8,7 @@
     {
       "name": "farm",
       "source": "./plugins/farm",
-      "description": "Put this computer's Claude Code sessions on your clodfarm farm: /farm connect https://<farm>, then /farm in a session, or every session of a folder",
+      "description": "Put this computer's Claude Code sessions on your clodfarm farm: /farm:connect https://<farm>, then /farm:on in a session, or /farm:folder for every session of a folder",
       "category": "productivity"
     }
   ]

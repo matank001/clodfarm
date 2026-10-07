@@ -1,12 +1,15 @@
 """Connect the Claude Code sessions on your own computer to a farm: the `farm` plugin, or `clodfarm attach`.
 
-In Claude Code, with the plugin (plugins/farm, `/plugin install farm@clodfarm`):
+In Claude Code, with the plugin (plugins/farm, `claude plugin install farm@clodfarm`), whose commands Claude Code
+names after it:
 
-    /farm connect https://<farm> [NAME]   connect this computer (a browser page, once); this session goes on
-    /farm  ·  /farm off  ·  /farm status  this session on the farm, off it, or which it is and why
-    /farm folder [off]                    sessions started in this folder go on the farm (or stop)
-    /farm everywhere [off]                every session does (`FARM=0 claude` leaves one out)
-    /farm sign-out                        end this computer's connection
+    /farm:connect https://<farm> [NAME]   connect this computer (a browser page, once); this session goes on
+    /farm:on  ·  /farm:off  ·  /farm:status   this session on the farm, off it, or which it is and why
+    /farm:folder [off]                    sessions started in this folder go on the farm (or stop)
+    /farm:everywhere [off]                every session does (`FARM=0 claude` leaves one out)
+    /farm:sign-out  ·  /farm:help         end this computer's connection · all of this
+
+The same as `/farm connect ...`, `/farm off`, and so on, where the command is the user's own (`clodfarm attach`).
 
 From a shell, with clodfarm installed (its hook goes in Claude Code's user settings instead of a plugin):
 
@@ -21,11 +24,11 @@ it as a local session of this computer, under its person's Claude, and hands bac
 computer. A session that isn't connected sends nothing at all.
 
 Which sessions are connected (the first that applies decides):
-  1. /farm or /farm off typed in the session (the hook takes it; it never reaches the model);
+  1. /farm:on or /farm:off typed in the session (the hook takes it; it never reaches the model);
   2. FARM=1 or FARM=0 in the environment `claude` was started with;
-  3. everywhere (/farm everywhere, `attach --all`);
+  3. everywhere (/farm:everywhere, `attach --all`);
   4. the folder the session started in is a connected folder, or inside one.
-Turning a session on with /farm sends its conversation so far. Turning it off and on again skips what was said while
+Turning a session on sends its conversation so far. Turning it off and on again skips what was said while
 it was off.
 
 It never gets in a session's way: a farm that is down or slow costs a session a few seconds at most, and turns that
@@ -59,7 +62,7 @@ HOOK_EVENTS = ("SessionStart", "UserPromptSubmit", "Stop", "SessionEnd")
 HOOK_MARK = " hook --guest"
 COMMAND_MARK = "<!-- clodfarm attach -->"
 SID_RE = re.compile(r"^[A-Za-z0-9-]{8,64}$")
-FARM_CMD = re.compile(r"^/(?:[A-Za-z0-9_.-]+:)?farm(?:\s+(.*))?$")  # /farm, or the plugin's own /farm:farm
+FARM_CMD = re.compile(r"^/farm(?::([A-Za-z-]+))?(?:\s+(.*))?$")  # the plugin's /farm:off, or /farm off
 NAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,31}$")  # a computer's name on the farm (as mcp.NAME_RE)
 SIGN_IN_WAIT = 300
 TIMEOUT = 5  # seconds per request to the farm; Claude Code gives the hook 15
@@ -345,7 +348,7 @@ def report(conf: dict, body: dict) -> dict | None:
 def connected(conf: dict, st: dict, env=os.environ) -> tuple[bool, str]:
     """Whether a session is on the farm, and why (see the module's doc)."""
     if st.get("on") is not None:
-        return bool(st["on"]), "/farm" if st["on"] else "/farm off"
+        return bool(st["on"]), _c("on") if st["on"] else _c("off")
     if env.get("FARM") in ("0", "1"):
         return env["FARM"] == "1", "FARM=" + env["FARM"]
     if conf.get("everywhere"):
@@ -395,10 +398,18 @@ def _send(conf: dict, st: dict, sid: str, event: str, mail: bool = False, **extr
             return out
 
 
-FARM_HELP = ("/farm puts this session on the farm, /farm off takes it off, /farm status says which and why. "
-             "/farm connect https://<farm> [name] connects this computer (once), /farm folder [off] puts the "
-             "sessions started in this folder on the farm, /farm everywhere [off] every session, and /farm sign-out "
-             "ends this computer's connection.")
+def _c(verb: str = "on") -> str:
+    """How the person types a /farm command: the plugin's are /farm:<verb>; `clodfarm attach`'s own is /farm <verb>."""
+    if os.environ.get("CLODFARM_PLUGIN"):
+        return "/farm:" + verb
+    return "/farm" if verb == "on" else "/farm " + verb
+
+
+def _help() -> str:
+    return (f"{_c('on')} puts this session on the farm, {_c('off')} takes it off, {_c('status')} says which and why. "
+            f"{_c('connect')} https://<farm> [name] connects this computer (once), {_c('folder')} [off] puts the "
+            f"sessions started in this folder on the farm, {_c('everywhere')} [off] every session, and "
+            f"{_c('sign-out')} ends this computer's connection.")
 
 
 def _change_conf(fn) -> dict:
@@ -417,7 +428,7 @@ def _turn_on(conf: dict, st: dict, sid: str) -> str:
     _read_new(st)
     if _send(conf, st, sid, "Connect"):
         return (f"This session is on the farm ({conf['url']}) as {conf.get('name')}: its conversation shows there "
-                f"under your Claude, and messages for {conf.get('name')} arrive here. /farm off ends it.")
+                f"under your Claude, and messages for {conf.get('name')} arrive here. {_c('off')} ends it.")
     return "This session is on the farm; the farm can't be reached right now, so its conversation goes with the next report."
 
 
@@ -427,14 +438,14 @@ def _not_connected() -> str:
         return ("Waiting for you to allow this computer on the farm's page in your browser"
                 + (f": {si['link']}" if si.get("link") else "."))
     if si.get("state") == "failed":
-        return f"Connecting to {si.get('url')} failed: {si.get('error')}. /farm connect {si.get('url')} tries again."
-    return "This computer isn't connected to a farm yet: /farm connect https://<your farm>"
+        return f"Connecting to {si.get('url')} failed: {si.get('error')}. {_c('connect')} {si.get('url')} tries again."
+    return f"This computer isn't connected to a farm yet: {_c('connect')} https://<your farm>"
 
 
 def _connect(conf: dict, st: dict, sid: str, args: list) -> str:
     url = args[0] if args else conf.get("url") or ""
     if not url:
-        return "Which farm? /farm connect https://<your farm> [a name for this computer]"
+        return f"Which farm? {_c('connect')} https://<your farm> [a name for this computer]"
     pub = farm_url(url)
     if pub == conf.get("url") and conf.get("refresh") and not conf.get("ended"):
         return f"This computer is already connected to {pub} as {conf.get('name')}. " + _turn_on(conf, st, sid)
@@ -445,16 +456,16 @@ def _connect(conf: dict, st: dict, sid: str, args: list) -> str:
     if si.get("state") == "failed":
         return f"Couldn't connect to {pub}: {si.get('error')}"
     return ("Opening the farm in your browser: allow this computer there (sign in to your Claude, MY CLAUDE, if it "
-            "asks). This session goes on the farm once it's connected; /farm status shows how it's going."
+            f"asks). This session goes on the farm once it's connected; {_c('status')} shows how it's going."
             + (f" If no browser opened, go to {si['link']}" if si.get("link") else ""))
 
 
 def _farm_command(conf: dict, st: dict, sid: str, args: list, env) -> str:
-    """The /farm command: done here, and the prompt is blocked (shown to the person, never sent to the model)."""
+    """A /farm command: done here, and the prompt is blocked (shown to the person, never sent to the model)."""
     verb, rest = (args[0].lower(), args[1:]) if args else ("on", [])
     try:
         if verb in ("help", "?"):
-            text = FARM_HELP
+            text = _help()
         elif verb == "connect":
             text = _connect(conf, st, sid, rest)
         elif not conf.get("url"):
@@ -468,19 +479,19 @@ def _farm_command(conf: dict, st: dict, sid: str, args: list, env) -> str:
                 for k in [k for k in c if k not in ("folders", "everywhere")]:
                     del c[k]
             _change_conf(forget)
-            text = f"Signed out: this computer's connection to {conf['url']} is over. /farm connect starts a new one."
+            text = f"Signed out: this computer's connection to {conf['url']} is over. {_c('connect')} starts a new one."
         elif conf.get("ended"):
             text = (f"The farm at {conf['url']} ended this computer's connection (unused for 30 days, or "
-                    f"disconnected there). /farm connect connects it again.")
+                    f"disconnected there). {_c('connect')} connects it again.")
         elif verb == "on":
             text = _turn_on(conf, st, sid)
         elif verb == "off":
             if connected(conf, st, env)[0] and st.get("sent"):
                 _read_new(st)
-                _send(conf, st, sid, "Disconnect", reason="/farm off")
+                _send(conf, st, sid, "Disconnect", reason=_c("off"))
             st["on"] = False
             st["pending"] = []
-            text = "This session is off the farm: nothing more of it is sent. /farm puts it back on."
+            text = f"This session is off the farm: nothing more of it is sent. {_c('on')} puts it back on."
         elif verb == "folder":
             d = os.path.realpath(st.get("cwd") or os.getcwd())
             off = rest[:1] == ["off"]
@@ -488,23 +499,23 @@ def _farm_command(conf: dict, st: dict, sid: str, args: list, env) -> str:
                 c["folders"] = [f for f in c.get("folders") or [] if f != d] + ([] if off else [d])
             conf = _change_conf(folders)
             text = (f"New sessions started in {d} stay off the farm." if off else
-                    f"Sessions started in {d}, or inside it, go on the farm from now on. This one: /farm.")
+                    f"Sessions started in {d}, or inside it, go on the farm from now on. This one: {_c('on')}.")
         elif verb == "everywhere":
             off = rest[:1] == ["off"]
             def everywhere(c):
                 c["everywhere"] = not off
             conf = _change_conf(everywhere)
-            text = ("Only the folders you connected (/farm folder), and /farm, put sessions on the farm now." if off
+            text = (f"Only the folders you connected ({_c('folder')}), and {_c('on')}, put sessions on the farm now." if off
                     else "Every new session goes on the farm from now on (FARM=0 claude leaves one out).")
         elif verb == "status":
             on, why = connected(conf, st, env)
             where = ("every session" if conf.get("everywhere") else
                      "sessions started in " + ", ".join(conf["folders"]) if conf.get("folders") else
-                     "only the sessions you put on with /farm")
+                     "only the sessions you put on with " + _c("on"))
             text = (f"This session is {'on' if on else 'not on'} the farm ({conf['url']}, as {conf.get('name')}): "
                     f"{why}. On the farm by themselves: {where}.")
         else:
-            text = f"/farm {verb}? " + FARM_HELP
+            text = f"{_c(verb)}? " + _help()
     except AttachError as e:
         text = str(e)
     return json.dumps({"decision": "block", "reason": "[farm] " + text})
@@ -530,7 +541,8 @@ def hook(ev: dict, env=os.environ) -> str | None:
             _prune()
         try:
             if m:
-                return _farm_command(conf, st, sid, (m.group(1) or "").split(), env)
+                verb = m.group(1) if m.group(1) and m.group(1) != "farm" else None
+                return _farm_command(conf, st, sid, ([verb] if verb else []) + (m.group(2) or "").split(), env)
             if conf.get("ended") or not connected(conf, st, env)[0]:
                 return None
             _read_new(st)

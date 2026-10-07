@@ -201,16 +201,15 @@ Claude Code gets a token for this farm only (OAuth 2.1 + PKCE; `clodfarm disconn
 See [docs/mcp.md](docs/mcp.md).
 
 To put your computer's own Claude Code sessions **on** the farm too (each one shows under your Claude, and the farm's
-Claudes can message it), install the `farm` plugin in Claude Code and connect once:
+Claudes can message it), install the `farm` plugin and connect once:
 
-```
-/plugin marketplace add matank001/clodfarm
-/plugin install farm@clodfarm
-/farm connect https://<your farm>
+```bash
+claude plugin marketplace add matank001/clodfarm && claude plugin install farm@clodfarm
 ```
 
-Then `/farm` puts a session on the farm, `/farm folder` every session started in that folder, and `/farm everywhere`
-all of them. See [docs/mcp.md](docs/mcp.md#put-your-computers-sessions-on-the-farm-the-farm-plugin).
+Then, in a new Claude Code session, `/farm:connect https://<your farm>`. After that `/farm:on` puts a session on the
+farm, `/farm:folder` every session started in that folder, and `/farm:everywhere` all of them.
+See [docs/mcp.md](docs/mcp.md#put-your-computers-sessions-on-the-farm-the-farm-plugin).
 
 <a name="deploy"></a>
 <h2><img src="assets/readme/deploy.png" height="44" alt="Deploy"></h2>

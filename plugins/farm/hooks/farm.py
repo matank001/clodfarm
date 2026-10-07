@@ -4,6 +4,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "lib"))
+os.environ["CLODFARM_PLUGIN"] = "1"  # its commands are /farm:<verb> (Claude Code names a plugin's after it)
 from clodfarm.attach import run_hook  # noqa: E402
 
 sys.exit(run_hook())
