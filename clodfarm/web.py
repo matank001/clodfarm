@@ -591,7 +591,7 @@ class FarmUI:
         """Per Claude, its conversations in the middle of a turn: how many, since when, and the newest one's title."""
         out: dict[str, dict] = {}
         for s in store.sessions(None, 200):
-            if s.get("kind") != "conversation" or not s.get("busy") or s.get("ended"):
+            if s.get("kind") not in ("conversation", "guest") or not s.get("busy") or s.get("ended"):
                 continue
             seen = float(s.get("last_at") or 0)
             try:  # the transcript grows while the turn runs (same box); a Claude on another box: its last hook

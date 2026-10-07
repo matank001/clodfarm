@@ -431,7 +431,7 @@ def cmd_hook(cfg, a):
     It never fails the session: any problem is reported on stderr and it exits 0."""
     if getattr(a, "guest", False):  # on a computer attached to a farm (`clodfarm attach`), not on the farm
         from .attach import run_hook
-        return run_hook()
+        return run_hook(listening=a.listen)
     from .prompts import mail_text
     from .sessions import session_kind
     try:

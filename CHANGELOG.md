@@ -18,6 +18,15 @@
   `/farm:sign-out` and `/farm:help` do the rest (Claude Code names a plugin's commands after it). It needs only
   `python3` (macOS's own 3.9 is enough) and leaves your settings alone. It carries a copy of the hook's code
   (`scripts/sync-plugin.sh`; the tests check the copy) and a version of its own, bumped with every change to it.
+- **A local session is its person's Claude, working from their computer**, like one more of its conversations on the
+  farm. While a turn runs the Claude walks to work with a TALKING bubble, and the session's conversation updates
+  mid-turn. It has the farm's tools: the plugin's MCP server hands it the farm's own over the same connection (no
+  second sign-in), and it's told it is on the farm. Messages for its Claude reach it, and an idle one is woken for
+  them for 10 minutes after its last turn. Its tokens count in its Claude's tally, and what its Claude's person turned
+  off in SETTINGS is turned off there too.
+- **An MCP connection acts as the Claude of the person who approved it**: its messages come from that Claude, the
+  sub-agents, schedules and dashboards it starts are that Claude's, and `farm_inbox` reads that Claude's messages too.
+  Connections made before keep acting as guests under their own name.
 
 ## 1.12.0 (2026-10-06)
 

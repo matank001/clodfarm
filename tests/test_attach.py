@@ -39,10 +39,12 @@ class Transcript:
         self.path = str(path)
         open(self.path, "w").close()
 
-    def say(self, role, text):
+    def say(self, role, text, usage=None):
         msg = {"role": role, "content": text if role == "user" else [{"type": "text", "text": text}]}
         if role == "assistant":
             msg["id"] = f"m{time.time_ns()}"
+            if usage:
+                msg["usage"] = usage
         with open(self.path, "a") as f:
             f.write(json.dumps({"type": role, "message": msg, "timestamp": "2026-10-07T10:00:00Z"}) + "\n")
 
@@ -112,7 +114,8 @@ def test_only_the_attached_folders_sessions_go_and_secrets_stay(laptop, tmp_path
     sub = repo / "pkg"
     sub.mkdir()
     out = attach.hook(ev("SessionStart", t, sub), env={})  # a session started inside an attached folder
-    assert out.startswith("[farm] This session is connected") and "matan-laptop" in out
+    assert out.startswith("[farm] This session is on the clodfarm farm") and "matan-laptop" in out
+    assert f"you are the farm's Claude '{ui.cfg.name}'" in out  # its person's Claude, working from the computer
     assert texts(ui) == ["deploy with [an API key] please", "deploying"]
     assert attach.hook(ev("Stop", t, repo, sid=other), env={}) is None and ui.store.session(other) is None
     t.say("user", "and the docs")
@@ -262,8 +265,8 @@ def test_install_keeps_other_hooks_and_detach_removes_ours(laptop, tmp_path):
     assert attach.cmd_attach(a) == 0 and attach.cmd_attach(a) == 0  # twice: still one of each
     cfg = json.load(open(os.path.join(home, "settings.json")))
     assert cfg["model"] == "opus" and cfg["hooks"]["Stop"][0] == mine
-    for e in attach.HOOK_EVENTS:
-        assert sum(attach._ours(g) for g in cfg["hooks"][e]) == 1
+    for e in attach.HOOK_EVENTS:  # Stop has two: the report, and the listener after it
+        assert sum(attach._ours(g) for g in cfg["hooks"][e]) == (2 if e == "Stop" else 1)
     assert attach.installed() and os.path.exists(os.path.join(home, "commands", "farm.md"))
     assert attach.load_conf()["folders"] == [os.path.realpath(repo)]
     assert attach.cmd_detach(Namespace(only=[str(repo)], all=False)) == 0
@@ -303,14 +306,16 @@ except urllib.error.HTTPError as e:
 
 
 def test_the_plugin_carries_the_same_code():
-    for f in ("__init__.py", "attach.py", "sessions.py", "scrub.py"):
+    for f in ("__init__.py", "attach.py", "sessions.py", "scrub.py", "policy.py"):
         assert open(os.path.join(ROOT, "clodfarm", f)).read() == open(os.path.join(PLUGIN, "lib", "clodfarm", f)).read(), \
             f"plugins/farm/lib/clodfarm/{f} is behind: run scripts/sync-plugin.sh"
     assert re.fullmatch(r"\d+\.\d+\.\d+", json.load(open(os.path.join(PLUGIN, ".claude-plugin", "plugin.json")))["version"])
     cmds = {f[:-3] for f in os.listdir(os.path.join(PLUGIN, "commands"))}  # /farm:<verb>, each one the hook takes
     assert cmds == {"connect", "on", "off", "status", "folder", "everywhere", "sign-out", "help"}
     hooks = json.load(open(os.path.join(PLUGIN, "hooks", "hooks.json")))["hooks"]
-    assert set(hooks) == set(attach.HOOK_EVENTS)
+    assert hooks == attach.hook_spec('python3 "${CLAUDE_PLUGIN_ROOT}/hooks/farm.py"'), "run scripts/sync-plugin.sh"
+    mcp = json.load(open(os.path.join(PLUGIN, ".mcp.json")))["mcpServers"]["farm"]
+    assert mcp["args"] == ["${CLAUDE_PLUGIN_ROOT}/hooks/mcp.py"]
     market = json.load(open(os.path.join(ROOT, ".claude-plugin", "marketplace.json")))
     assert [p["source"] for p in market["plugins"]] == ["./plugins/farm"]
 
@@ -384,3 +389,106 @@ def test_slash_farm_folder_everywhere_and_sign_out(laptop, tmp_path):
     conf = attach.load_conf()
     assert conf == {"folders": [], "everywhere": True} and ui.oauth.connections() == []
     assert "isn't connected to a farm yet" in farm_cmd("/farm")
+
+
+
+# ------------------------------------------------- a local session is its person's Claude, at work
+def test_it_shows_at_work_and_counts_for_its_claude(laptop, tmp_path):
+    base, ui, repo = laptop
+    t = Transcript(tmp_path / "s.jsonl")
+    env = {"FARM": "1"}
+    attach.hook(ev("SessionStart", t, repo), env=env)
+    t.say("user", "refactor the parser")
+    attach.hook(ev("UserPromptSubmit", t, repo, prompt="refactor the parser"), env=env)
+    talking = ui._talking(ui.store)
+    assert talking[ui.cfg.name]["n"] == 1  # on the map: its Claude walks to work, TALKING
+    t.say("assistant", "reading it", usage={"input_tokens": 100, "output_tokens": 20, "cache_read_input_tokens": 5})
+    attach.hook(ev("PostToolBatch", t, repo), env=env)  # mid-turn: what it has done so far shows
+    assert texts(ui)[-1] == "reading it" and ui.store.session(SID)["busy"] is True
+    assert ui.store.tokens_today_by()[ui.cfg.name]["total"] == 125
+    attach.hook(ev("Stop", t, repo), env=env)
+    assert ui.cfg.name not in ui._talking(ui.store)
+    assert ui.store.tokens_today_by()[ui.cfg.name]["total"] == 125  # counted once
+
+
+def test_messages_for_its_claude_reach_it(laptop, tmp_path):
+    base, ui, repo = laptop
+    t = Transcript(tmp_path / "s.jsonl")
+    env = {"FARM": "1"}
+    attach.hook(ev("SessionStart", t, repo), env=env)
+    ui.store.send_message("gil", ui.cfg.name, "can you review my branch?")  # to the Claude, not the computer
+    out = attach.hook(ev("UserPromptSubmit", t, repo, prompt="hi"), env=env)
+    assert "can you review my branch?" in out
+
+
+def test_its_claudes_tool_settings_apply(laptop, tmp_path):
+    base, ui, repo = laptop
+    t = Transcript(tmp_path / "s.jsonl")
+    ui.store.put_claude(ui.cfg.name, tools={"deny": ["shell"]})  # its person turned the shell off on the farm
+    attach.hook(ev("SessionStart", t, repo), env={"FARM": "1"})
+    assert json.load(open(os.path.join(attach.home(), "policy.json"))) == {"deny": ["shell"]}
+    pre = lambda tool, env, **inp: attach.hook(ev("PreToolUse", t, repo, tool_name=tool, tool_input=inp), env=env)  # noqa: E731
+    d = json.loads(pre("Bash", {"FARM": "1"}, command="rm -rf build"))
+    assert d["hookSpecificOutput"]["permissionDecision"] == "deny" and "turned off" in d["hookSpecificOutput"][
+        "permissionDecisionReason"]
+    assert pre("Read", {"FARM": "1"}, file_path="x") is None
+    assert pre("Bash", {"FARM": "0"}, command="ls") is None  # a session that isn't on the farm: its own rules
+    ui.store.put_claude(ui.cfg.name, tools="all")
+    attach.hook(ev("Stop", t, repo), env={"FARM": "1"})
+    assert not os.path.exists(os.path.join(attach.home(), "policy.json"))  # nothing off: the hook starts no Python
+
+
+def test_an_idle_session_is_woken_for_its_messages(laptop, tmp_path):
+    base, ui, repo = laptop
+    t = Transcript(tmp_path / "s.jsonl")
+    env = {"FARM": "1"}
+    attach.hook(ev("SessionStart", t, repo), env=env)
+    got = {}
+    th = threading.Thread(target=lambda: got.update(r=attach.listen(ev("Stop", t, repo), env=env)))
+    th.start()
+    time.sleep(1.5)
+    assert th.is_alive()  # nothing yet: it waits
+    ui.store.send_message("gil", ui.cfg.name, "the deploy is done")
+    th.join(20)
+    code, text = got["r"]
+    assert code == 2 and "the deploy is done" in text  # exit 2: Claude Code wakes the session with it
+    assert ui.store.unread(ui.cfg.name) == []
+    # a new turn stops the listener, at once
+    th = threading.Thread(target=lambda: got.update(r=attach.listen(ev("Stop", t, repo), env=env)))
+    th.start()
+    time.sleep(1)
+    attach.hook(ev("UserPromptSubmit", t, repo, prompt="next"), env=env)
+    th.join(3)
+    assert not th.is_alive() and got["r"] == (0, "")
+    assert attach.listen(ev("Stop", t, repo), env={"FARM": "0"}) == (0, "")  # not on the farm: no listener
+
+
+def test_the_plugins_listener_wakes_through_its_hook(laptop, tmp_path):
+    base, ui, repo = laptop
+    t = Transcript(tmp_path / "s.jsonl")
+    attach.hook(ev("SessionStart", t, repo), env={"FARM": "1"})
+    ui.store.send_message("gil", ui.cfg.name, "ping")
+    p = subprocess.run([os.sys.executable, os.path.join(PLUGIN, "hooks", "farm.py"), "--listen"],
+                       input=json.dumps(ev("Stop", t, repo)), capture_output=True, text=True,
+                       env={**os.environ, "FARM": "1"}, timeout=60)
+    assert p.returncode == 2 and "ping" in p.stderr
+
+
+def test_the_mcp_bridge_gives_it_the_farms_tools(laptop, tmp_path):
+    base, ui, repo = laptop
+    init = attach.mcp_forward({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {
+        "protocolVersion": "2025-06-18", "capabilities": {}, "clientInfo": {"name": "t", "version": "1"}}})
+    assert f"You are the farm Claude '{ui.cfg.name}'" in init["result"]["instructions"]
+    tools = {t["name"] for t in attach.mcp_forward({"jsonrpc": "2.0", "id": 2, "method": "tools/list"})["result"]["tools"]}
+    assert {"farm_status", "farm_spawn", "farm_msg", "farm_inbox"} <= tools
+    out = attach.mcp_forward({"jsonrpc": "2.0", "id": 3, "method": "tools/call",
+                              "params": {"name": "farm_msg", "arguments": {"to": "matan-laptop", "text": "note to self"}}})
+    assert not out["result"]["isError"], out
+    assert ui.store.unread("matan-laptop")[0]["from"] == ui.cfg.name  # it speaks as its Claude
+    assert attach.mcp_forward({"jsonrpc": "2.0", "method": "notifications/initialized"}) is None
+    attach.save_conf({})  # not connected: no tools, and a hint
+    assert attach.mcp_forward({"jsonrpc": "2.0", "id": 4, "method": "tools/list"})["result"]["tools"] == []
+    p = subprocess.run([os.sys.executable, os.path.join(PLUGIN, "hooks", "mcp.py")], capture_output=True, text=True,
+                       input=json.dumps({"jsonrpc": "2.0", "id": 1, "method": "initialize", "params": {}}) + "\n",
+                       timeout=30)
+    assert "/farm:connect" in json.loads(p.stdout)["result"]["instructions"]

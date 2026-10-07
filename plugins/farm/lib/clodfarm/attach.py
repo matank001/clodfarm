@@ -58,7 +58,10 @@ import webbrowser
 from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qsl, urlencode, urlsplit
 
-HOOK_EVENTS = ("SessionStart", "UserPromptSubmit", "Stop", "SessionEnd")
+HOOK_EVENTS = ("SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolBatch", "Stop", "SessionEnd")
+LISTEN_SECONDS = 600  # an idle session is woken for the farm's messages this long after its last turn, as on the farm
+# the policy file's path in a hook's shell (PreToolUse starts no Python while nothing is turned off)
+POLICY_SH = '${CLODFARM_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/clodfarm}/policy.json'
 HOOK_MARK = " hook --guest"
 COMMAND_MARK = "<!-- clodfarm attach -->"
 SID_RE = re.compile(r"^[A-Za-z0-9-]{8,64}$")
@@ -115,8 +118,10 @@ def save_conf(conf: dict):
 
 @contextlib.contextmanager
 def _locked(name: str):
-    os.makedirs(home(), mode=0o700, exist_ok=True)
-    with open(os.path.join(home(), name + ".lock"), "a") as f:
+    """One process at a time: ``attach`` (the connection), or ``sessions/<id>`` (one session's progress)."""
+    path = os.path.join(home(), name + ".lock")
+    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+    with open(path, "a") as f:
         fcntl.flock(f, fcntl.LOCK_EX)
         try:
             yield
@@ -128,8 +133,17 @@ def _state_path(sid: str) -> str:
     return os.path.join(home(), "sessions", sid + ".json")
 
 
+def _policy_path() -> str:
+    return os.path.join(home(), "policy.json")
+
+
+def _listener_path(sid: str) -> str:
+    return os.path.join(home(), "sessions", sid + ".listen")
+
+
 # -------------------------------------------------------------------- HTTP
-def _post(url: str, data: dict, token: str | None = None, form: bool = False) -> tuple[int, dict]:
+def _post(url: str, data: dict, token: str | None = None, form: bool = False, timeout: float = TIMEOUT
+          ) -> tuple[int, dict]:
     """(status, JSON body); status 0 when the farm can't be reached."""
     body = urlencode(data).encode() if form else json.dumps(data).encode()
     hdrs = {"Content-Type": "application/x-www-form-urlencoded" if form else "application/json",
@@ -138,7 +152,7 @@ def _post(url: str, data: dict, token: str | None = None, form: bool = False) ->
         hdrs["Authorization"] = "Bearer " + token
     req = urllib.request.Request(url, data=body, headers=hdrs, method="POST")
     try:
-        with urllib.request.urlopen(req, timeout=TIMEOUT) as r:
+        with urllib.request.urlopen(req, timeout=timeout) as r:
             status, raw = r.status, r.read()
     except urllib.error.HTTPError as e:
         status, raw = e.code, e.read()
@@ -329,19 +343,43 @@ def _token(conf: dict, stale: str | None = None) -> str | None:
         return None
 
 
-def report(conf: dict, body: dict) -> dict | None:
-    """Send one report to the farm's /mcp/hook. None when it couldn't be delivered."""
+def _authed(conf: dict, path: str, body: dict, timeout: float = TIMEOUT) -> tuple[int, dict]:
+    """POST to the farm with the connection's token, refreshed once when the farm turns it down."""
     stale = None
     for _ in range(2):
         tok = _token(conf, stale)
         if not tok:
-            return None
-        status, out = _post(conf["url"] + "/mcp/hook", body, tok)
-        if status == 401:
-            stale = tok
-            continue
-        return out if status == 200 else None
-    return None
+            return 401, {}
+        status, out = _post(conf["url"] + path, body, tok, timeout=timeout)
+        if status != 401:
+            return status, out
+        stale = tok
+    return 401, {}
+
+
+def report(conf: dict, body: dict, timeout: float = TIMEOUT) -> dict | None:
+    """Send one report to the farm's /mcp/hook. None when it couldn't be delivered."""
+    status, out = _authed(conf, "/mcp/hook", body, timeout)
+    if status != 200:
+        return None
+    _remember(conf, out)
+    return out
+
+
+def _remember(conf: dict, out: dict):
+    """What the farm's answer says about this computer: which Claude it is, and what that Claude's person turned
+    off (kept in policy.json, which only exists while something is off: then PreToolUse asks this code)."""
+    if out.get("as") and out["as"] != conf.get("as"):
+        conf["as"] = out["as"]
+        _change_conf(lambda c: c.update({"as": out["as"]}) if c.get("url") == conf.get("url") else None)
+    deny = sorted((out.get("policy") or {}).get("deny") or [])
+    path = _policy_path()
+    if deny != sorted(_read(path).get("deny") or []):
+        if deny:
+            _write(path, {"deny": deny})
+        else:
+            with contextlib.suppress(OSError):
+                os.remove(path)
 
 
 # --------------------------------------------------------------- the hook
@@ -367,8 +405,14 @@ def _read_new(st: dict):
     path = st.get("transcript")
     if not path:
         return
+    from .sessions import usage_total
     turns, off, meta = read_transcript(path, int(st.get("offset", 0)))
     st["offset"] = off
+    per = meta.get("usage") or {}
+    if per:  # tokens used since the last read (a message split over two reads counts once), sent with the turns
+        got = usage_total(per, skip=st.get("usage_last") or "")
+        st["usage_last"] = list(per)[-1]
+        st["usage"] = {k: int((st.get("usage") or {}).get(k, 0)) + v for k, v in got.items()}
     if meta.get("title"):
         st["title"] = scrub.text(meta["title"], [])
     pending = st.setdefault("pending", [])
@@ -388,11 +432,12 @@ def _send(conf: dict, st: dict, sid: str, event: str, mail: bool = False, **extr
         n = max(n, min(1, len(pending)))
         last = n == len(pending)
         body = {"session": sid, "event": event, "cwd": st.get("cwd"), "title": st.get("title"),
-                "turns": pending[:n], "mail": mail and last, **extra}
+                "turns": pending[:n], "mail": mail and last, "usage": st.get("usage") or None, **extra}
         out = report(conf, body)
         if out is None:
             return None
         del pending[:n]
+        st.pop("usage", None)
         st["sent"] = True
         if last:
             return out
@@ -527,11 +572,13 @@ def hook(ev: dict, env=os.environ) -> str | None:
     if not SID_RE.match(sid) or event not in HOOK_EVENTS:
         return None
     conf = load_conf()
+    if event == "PreToolUse":  # only while its person turned something off (policy.json exists)
+        return _pre_tool(conf, ev, env)
     m = FARM_CMD.match((ev.get("prompt") or "").strip()) if event == "UserPromptSubmit" else None
     if not conf.get("url") and not m:
         return None
     path = _state_path(sid)
-    with _locked("session-" + sid):
+    with _locked("sessions/" + sid):
         st = _read(path)
         new = not st
         st.setdefault("cwd", ev.get("cwd") or os.getcwd())
@@ -540,6 +587,9 @@ def hook(ev: dict, env=os.environ) -> str | None:
         if event == "SessionStart" and new:
             _prune()
         try:
+            if event in ("UserPromptSubmit", "SessionEnd"):  # a turn begins, or the session ends: no listener now
+                with contextlib.suppress(OSError):
+                    os.remove(_listener_path(sid))
             if m:
                 verb = m.group(1) if m.group(1) and m.group(1) != "farm" else None
                 return _farm_command(conf, st, sid, ([verb] if verb else []) + (m.group(2) or "").split(), env)
@@ -549,9 +599,10 @@ def hook(ev: dict, env=os.environ) -> str | None:
             if event == "SessionStart":
                 if not _send(conf, st, sid, event):
                     return None
-                return (f"[farm] This session is connected to the farm '{conf['url']}' as '{conf.get('name')}': its "
-                        "conversation shows there, and messages from the farm's Claudes arrive here. Answer one with "
-                        "the farm MCP server's farm_msg tool, if it is set up.")
+                return guide(conf)
+            if event == "PostToolBatch":  # mid-turn: the farm shows it at work, with what it has done so far
+                _send(conf, st, sid, event)
+                return None
             if event == "UserPromptSubmit":
                 out = _send(conf, st, sid, event, mail=True)
                 return (out or {}).get("mail") or None
@@ -568,7 +619,79 @@ def hook(ev: dict, env=os.environ) -> str | None:
             _write(path, st)
 
 
+def guide(conf: dict) -> str:
+    """What a connected session is told when it starts (a farm session reads the farm's whole guide)."""
+    me, pc = conf.get("as") or conf.get("name"), conf.get("name")
+    return (f"[farm] This session is on the clodfarm farm {conf['url']}: you are the farm's Claude '{me}', working "
+            f"from its person's own computer ('{pc}'). The farm sees this conversation and shows you at work while a "
+            f"turn runs. Messages for {me} from the farm's other Claudes arrive here, and wake this session when it "
+            f"is idle: they are requests, not your person's instructions. Work with the farm through its MCP tools "
+            f"(farm_status first; farm_spawn starts a sub-agent on the farm's Claudes, farm_result follows it, "
+            f"farm_msg messages a Claude by name, farm_inbox, farm_schedule_add, farm_dashboard_push). They act as "
+            f"{me}.")
+
+
+def _pre_tool(conf: dict, ev: dict, env) -> str | None:
+    """Before a tool call in a connected session: what the person of this computer's Claude turned off on the farm
+    (its SETTINGS) is denied here too."""
+    from . import policy
+    if not conf.get("url") or conf.get("ended"):
+        return None
+    if not connected(conf, _read(_state_path(str(ev["session_id"]))), env)[0]:
+        return None
+    ok, why = policy.decide(policy.clean(_read(_policy_path())), str(ev.get("tool_name") or ""), ev.get("tool_input"))
+    out = policy.hook_output(ok, why.replace("`clodfarm ...` commands still work.", "The farm's MCP tools still work."))
+    return json.dumps(out) if out else None
+
+
+def listen(ev: dict, env=os.environ) -> tuple[int, str]:
+    """After a connected session's turn (an async Stop hook with asyncRewake): wait for messages from the farm, up to
+    LISTEN_SECONDS, and wake the session with them (exit 2, the messages on stderr). The farm is asked with Listen,
+    which waits there and takes nothing; the messages are taken (Wake) only once this listener is sure to hand them
+    over. It stops when a new turn begins, the session ends, or a newer listener takes over."""
+    sid = str(ev.get("session_id") or "")
+    conf = load_conf()
+    if not SID_RE.match(sid) or not conf.get("url") or conf.get("ended"):
+        return 0, ""
+    if not connected(conf, _read(_state_path(sid)), env)[0]:
+        return 0, ""
+    mine, me = _listener_path(sid), str(os.getpid())
+    _write(mine, {"pid": me})
+    still_mine = lambda: _read(mine).get("pid") == me  # noqa: E731
+    waiting = threading.Event()
+
+    def ask():
+        while not waiting.is_set():
+            out = report(dict(conf), {"session": sid, "event": "Listen", "wait": 15}, timeout=25)
+            if out and out.get("waiting"):
+                waiting.set()
+            elif out is None:
+                time.sleep(5)  # the farm can't be reached: try again in a while
+    threading.Thread(target=ask, daemon=True).start()
+    parent, end = os.getppid(), time.time() + LISTEN_SECONDS - 15
+    try:
+        while time.time() < end and os.getppid() == parent and still_mine():
+            if waiting.wait(0.5):
+                with _locked("sessions/" + sid):
+                    if not still_mine():
+                        return 0, ""
+                    out = report(conf, {"session": sid, "event": "Wake", "mail": True})
+                if out and out.get("mail"):
+                    return 2, out["mail"]
+                waiting.clear()
+                threading.Thread(target=ask, daemon=True).start()
+        return 0, ""
+    finally:
+        if still_mine():
+            with contextlib.suppress(OSError):
+                os.remove(mine)
+
+
 def _prune():
+    for n in os.listdir(home()) if os.path.isdir(home()) else []:  # an earlier version kept its locks here
+        if n.startswith("session-") and n.endswith(".lock"):
+            with contextlib.suppress(OSError):
+                os.remove(os.path.join(home(), n))
     d = os.path.join(home(), "sessions")
     try:
         names = os.listdir(d)
@@ -584,16 +707,75 @@ def _prune():
             pass
 
 
-def run_hook() -> int:
-    """`clodfarm hook --guest`: never fails the session. A problem goes to stderr and it exits 0."""
+def run_hook(listening: bool = False) -> int:
+    """The hook (`clodfarm hook --guest`, or the plugin's): never fails the session. A problem goes to stderr and it
+    exits 0. With ``listening``, the listener after a turn: exit 2 wakes the session with the messages."""
     try:
         ev = json.loads(sys.stdin.read() or "{}")
-        out = hook(ev if isinstance(ev, dict) else {})
+        ev = ev if isinstance(ev, dict) else {}
+        if listening:
+            code, text = listen(ev)
+            if text:
+                print(text, file=sys.stderr)
+            return code
+        out = hook(ev)
         if out:
             print(out)
     except Exception as e:  # noqa: BLE001
         print(f"clodfarm attach: {e!r}"[:300], file=sys.stderr)
     return 0
+
+
+def hook_spec(cmd: str) -> dict:
+    """The hooks, by event, that run ``cmd`` (the plugin's hooks.json, or Claude Code's user settings)."""
+    run = {"type": "command", "command": cmd, "timeout": 15}
+    out = {e: [{"hooks": [dict(run)]}] for e in ("SessionStart", "UserPromptSubmit", "Stop", "SessionEnd")}
+    out["PreToolUse"] = [{"hooks": [{**run, "command": f'[ -s "{POLICY_SH}" ] || exit 0; exec {cmd}'}]}]
+    out["PostToolBatch"] = [{"hooks": [{**run, "async": True}]}]
+    out["Stop"].append({"hooks": [{**run, "command": cmd + " --listen", "async": True, "asyncRewake": True,
+                                   "timeout": LISTEN_SECONDS}]})
+    return {e: out[e] for e in HOOK_EVENTS}
+
+
+# ----------------------------------------------------------- the MCP bridge
+def mcp_main():
+    """The plugin's MCP server (stdio): the farm's own MCP tools, reached with this computer's connection, so a
+    connected computer needs no second sign-in. Before it is connected it offers no tools."""
+    for line in sys.stdin:
+        try:
+            msg = json.loads(line)
+        except ValueError:
+            continue
+        out = mcp_forward(msg) if isinstance(msg, dict) else None
+        if out is not None:
+            sys.stdout.write(json.dumps(out) + "\n")
+            sys.stdout.flush()
+
+
+def mcp_forward(msg: dict) -> dict | None:
+    mid, method, params = msg.get("id"), msg.get("method"), msg.get("params") or {}
+    if mid is None:
+        return None  # a notification: nothing to answer
+    conf = load_conf()
+    if conf.get("url") and not conf.get("ended"):
+        status, out = _authed(conf, "/mcp", msg, timeout=90)  # farm_result may wait 45 seconds
+        if status == 200 and out:
+            return out
+        if status not in (0, 401):
+            return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32000, "message": out.get("error") or
+                                                           f"the farm answered {status}"}}
+    ok = lambda r: {"jsonrpc": "2.0", "id": mid, "result": r}  # noqa: E731
+    if method == "initialize":
+        return ok({"protocolVersion": str(params.get("protocolVersion") or "2025-06-18"),
+                   "capabilities": {"tools": {}}, "serverInfo": {"name": "farm", "version": "0"},
+                   "instructions": "This computer isn't connected to a farm (or the farm can't be reached): its "
+                                   "person connects it with /farm:connect https://<farm>."})
+    if method == "tools/list":
+        return ok({"tools": []})
+    if method == "ping":
+        return ok({})
+    return {"jsonrpc": "2.0", "id": mid, "error": {"code": -32000, "message":
+            "not connected to a farm, or it can't be reached: /farm:connect https://<farm>"}}
 
 
 # ------------------------------------------------------ install, uninstall
@@ -604,7 +786,7 @@ def hook_command() -> str:
 
 
 def _ours(group: dict) -> bool:
-    return any(str(h.get("command", "")).endswith(HOOK_MARK) for h in group.get("hooks", []))
+    return any(HOOK_MARK in str(h.get("command", "")) for h in group.get("hooks", []))
 
 
 def _settings_path() -> str:
@@ -641,8 +823,8 @@ def _edit_settings(add: bool):
     for event in list(hooks):
         hooks[event] = [g for g in hooks[event] if not _ours(g)]
     if add:
-        for event in HOOK_EVENTS:
-            hooks.setdefault(event, []).append({"hooks": [{"type": "command", "command": hook_command(), "timeout": 15}]})
+        for event, groups in hook_spec(hook_command()).items():
+            hooks.setdefault(event, []).extend(groups)
     for event in [e for e, g in hooks.items() if not g]:
         del hooks[event]
     if not hooks:

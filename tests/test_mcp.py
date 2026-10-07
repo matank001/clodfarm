@@ -150,11 +150,11 @@ def test_full_flow_tools_and_messages(farm):
     names = {t["name"] for t in call(base, tok["access_token"], "tools/list")[1]["result"]["tools"]}
     assert {"farm_status", "farm_spawn", "farm_msg", "farm_result"} <= names
     err, st = tool(base, tok["access_token"], "farm_status")
-    assert not err and st["you"] == "matan-laptop"
+    assert not err and st["you"] == ui.cfg.name and st["computer"] == "matan-laptop"  # its person's Claude, from there
     err, started = tool(base, tok["access_token"], "farm_spawn", title="Add CSV export", prompt="Add CSV export, with tests.")
     assert not err
     t = ui.store.get_task(started["started"])
-    assert t["owner"] == "matan-laptop" and t["created_by"] == "matan-laptop" and t["status"] == "queued"
+    assert t["owner"] == ui.cfg.name and t["created_by"] == "matan-laptop" and t["status"] == "queued"
     err, res = tool(base, tok["access_token"], "farm_result", id=t["id"])
     assert res["status"] == "queued" and res["prompt"] == "Add CSV export, with tests."
     # a farm Claude answers the connection by name; the connection reads it in its inbox

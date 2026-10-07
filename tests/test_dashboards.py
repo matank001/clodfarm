@@ -134,7 +134,7 @@ def test_mcp_tools(farm):  # noqa: F811
     err, out = tool(base, tok["access_token"], "farm_dashboard_push", dashboard="perf", spec=SPEC)
     assert not err and out["url"].endswith("/dashboards/perf")
     err, rows = tool(base, tok["access_token"], "farm_dashboards")
-    assert not err and rows[0]["slug"] == "perf" and rows[0]["owner"] == "matan-laptop"
+    assert not err and rows[0]["slug"] == "perf" and rows[0]["owner"] == farm_ui.cfg.name
     err, text = tool(base, tok["access_token"], "farm_dashboard_push", dashboard="perf", spec={"widgets": [{"type": "x"}]})
     assert err and "type must be one of" in text
     _, ro = connect(base, access="read")

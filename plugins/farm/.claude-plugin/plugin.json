@@ -1,6 +1,6 @@
 {
   "name": "farm",
-  "version": "1.12.1",
+  "version": "1.13.0",
   "description": "Put this computer's Claude Code sessions on your clodfarm farm: each shows under your Claude there, and the farm's Claudes can message it",
   "author": {
     "name": "clodfarm",

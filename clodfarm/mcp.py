@@ -319,11 +319,12 @@ def run_tool(ui, grant: dict, name: str, args: dict):
     from .cli import _claudes, _seats, _seats_json
     from .schedule import describe, parse_at, parse_every
     store, cfg, me = ui.store, ui.cfg, grant["name"]
+    as_ = grant.get("owner") or me  # a connection its person made acts as their Claude, working from their computer
     names = lambda: {c["name"] for c in _claudes(cfg, store)}  # noqa: E731
     s = lambda k, n=4000: str(args.get(k) or "").strip()[:n]  # noqa: E731
     if name == "farm_status":
         active = store.list_tasks("running") + store.list_tasks("waiting") + store.list_tasks("queued", 20)
-        return {"farm": cfg.farm_id, "you": me, "paused": store.control(), "claudes": _claudes(cfg, store),
+        return {"farm": cfg.farm_id, "you": as_, "computer": me, "paused": store.control(), "claudes": _claudes(cfg, store),
                 "subagents": [_task(t) for t in active]}
     if name == "farm_budget":
         return {"seats": _seats_json(_seats(cfg, store)), "policy": vars(cfg.policy)}
@@ -355,7 +356,7 @@ def run_tool(ui, grant: dict, name: str, args: dict):
         return {"id": x["id"], "claude": x.get("claude"), "kind": x.get("kind"), "title": x.get("title"),
                 "conversation": [{k: t.get(k) for k in ("role", "kind", "text", "at")} for t in store.turns(x["id"])]}
     if name == "farm_inbox":
-        return store.inbox(me, unread_only=True, mark_read=not args.get("peek"))
+        return [m for a in addresses(grant) for m in store.inbox(a, unread_only=True, mark_read=not args.get("peek"))]
     if name == "farm_schedules":
         return [{**r, "when": describe(r)} for r in store.schedules()]
     # ------------------------------------------------------------- farm:work
@@ -367,7 +368,7 @@ def run_tool(ui, grant: dict, name: str, args: dict):
             raise ToolError(f"no Claude named '{on}' is on the farm ({', '.join(sorted(names())) or 'none'})")
         if store.count("queued") >= cfg.max_queue:
             raise ToolError(f"{cfg.max_queue} sub-agents are already waiting; try again later")
-        t = store.add_task(title, prompt, created_by=me, to=on, owner=me, max_depth=cfg.max_depth,
+        t = store.add_task(title, prompt, created_by=me, to=on, owner=as_, max_depth=cfg.max_depth,
                            max_attempts=cfg.max_attempts)
         store.event("mcp.spawn", f"{me} started sub-agent {t['id']} over MCP: {title[:80]}", task=t["id"], by=me)
         return {"started": t["id"], "title": t["title"], "on": on or "whichever Claude has budget",
@@ -378,8 +379,8 @@ def run_tool(ui, grant: dict, name: str, args: dict):
             raise ToolError(f"no Claude named '{to}' is on the farm ({', '.join(sorted(names())) or 'none'})")
         if not text:
             raise ToolError("the message is empty")
-        store.send_message(me, to, text)
-        return {"sent": to, "note": f"it reads it on its next turn; answers come to '{me}' (farm_inbox)"}
+        store.send_message(as_, to, text)
+        return {"sent": to, "note": f"it reads it on its next turn; answers come to '{as_}' (farm_inbox)"}
     if name == "farm_cancel":
         return {"cancelled": store.cancel(s("id", 64))}
     if name == "farm_retry":
@@ -393,7 +394,7 @@ def run_tool(ui, grant: dict, name: str, args: dict):
             spec = {"cron": s("cron", 100)} if whens == ["cron"] else {"every": parse_every(s("every", 20))} \
                 if whens == ["every"] else {"at": parse_at(s("at", 40), tz)}
             sch = store.add_schedule(s("title", 200), s("prompt", 100_000) or s("title", 200), tz=tz,
-                                     to=s("on", 64) or None, created_by=me, owner=me, **spec)
+                                     to=s("on", 64) or None, created_by=me, owner=as_, **spec)
         except (ValueError, KeyError) as e:
             raise ToolError(f"bad schedule: {e}") from None
         return {**sch, "when": describe(sch)}
@@ -405,7 +406,7 @@ def run_tool(ui, grant: dict, name: str, args: dict):
         try:
             if name == "farm_dashboard_push":
                 folder = args.get("folder")
-                d = dashboards.push(store, s("dashboard", 48), args.get("spec"), by=me, owner=me,
+                d = dashboards.push(store, s("dashboard", 48), args.get("spec"), by=me, owner=as_,
                                     folder=None if folder is None else str(folder)[:200])
                 if s("refresh", 4000) and not (d.get("refresh") or {}).get("cmd"):  # a command (from the CLI) stays
                     d = dashboards.set_refresh(store, d["slug"], agent=s("refresh", 4000), by=me)
@@ -447,7 +448,11 @@ def rpc(ui, grant: dict, msg: dict):
                    "capabilities": {"tools": {"listChanged": False}},
                    "serverInfo": {"name": "clodfarm", "title": f"clodfarm · {ui.cfg.farm}", "version": __version__},
                    "instructions": (
-                       f"You are connected to the clodfarm farm '{ui.cfg.farm}' as '{grant['name']}'. The farm runs "
+                       (f"You are the farm Claude '{grant['owner']}', working from its person's own computer "
+                        f"('{grant['name']}') on the clodfarm farm '{ui.cfg.farm}': you message, start sub-agents and "
+                        f"read your inbox as '{grant['owner']}'. " if grant.get("owner") else
+                        f"You are connected to the clodfarm farm '{ui.cfg.farm}' as '{grant['name']}'. ") +
+                       "The farm runs "
                        "Claude Code agents around the clock, each Claude on one person's account, paced on its real "
                        "5-hour and weekly usage. Use farm_status first. farm_spawn hands work to the farm (a "
                        "self-contained prompt; it lands on main only when the farm's tests pass) and farm_result "
@@ -481,8 +486,10 @@ def rpc(ui, grant: dict, msg: dict):
 
 # ============================================================ guest sessions
 SID_RE = re.compile(r"^[A-Za-z0-9-]{8,64}$")
-GUEST_EVENTS = ("SessionStart", "UserPromptSubmit", "Stop", "SessionEnd", "Connect", "Disconnect")
-MAX_GUEST_TURNS = 400  # per report; `clodfarm attach` sends a long conversation in several
+GUEST_EVENTS = ("SessionStart", "UserPromptSubmit", "PostToolBatch", "Stop", "SessionEnd", "Connect", "Disconnect",
+                "Listen", "Wake")
+MAX_GUEST_TURNS = 400  # per report; the computer sends a long conversation in several
+LISTEN_MAX = 20  # seconds a Listen report waits for mail (a proxy in front, like CloudFront, gives up at 30)
 
 
 def _guest_turns(raw) -> list[dict]:
@@ -499,36 +506,77 @@ def _guest_turns(raw) -> list[dict]:
     return out
 
 
-def guest_report(store, grant: dict, body: dict) -> tuple[int, dict]:
-    """A Claude Code session on a connected computer reports itself (`clodfarm attach`'s hook): the session and its
-    new turns go in the farm's store as a ``guest`` session of that computer, shown under the farm Claude whose person
-    connected it, and the messages waiting for the computer's name come back (``mail``) when it asks for them.
+def _guest_usage(raw) -> dict:
+    if not raw:
+        return {}
+    if not isinstance(raw, dict):
+        raise ValueError("usage is {input, output, cache_write, cache_read}")
+    out = {}
+    for k in ("input", "output", "cache_write", "cache_read"):
+        v = raw.get(k, 0)
+        if not isinstance(v, int) or isinstance(v, bool) or not 0 <= v <= 10 ** 9:
+            raise ValueError("usage counts are whole numbers of tokens")
+        out[k] = v
+    return out
 
-    A computer only ever writes its own sessions: a session id the farm already holds for anyone else is refused.
-    Its tokens count for nobody's budget (the session runs on the computer's own Claude account)."""
+
+def addresses(grant: dict) -> list[str]:
+    """Where a computer's sessions take their messages: its own name, and its person's Claude (it is that Claude,
+    working from the computer: one more of its conversations)."""
+    owner = grant.get("owner")
+    return [grant["name"]] + ([owner] if owner and owner != grant["name"] else [])
+
+
+def guest_report(store, grant: dict, body: dict) -> tuple[int, dict]:
+    """A Claude Code session on a connected computer reports itself (the `farm` plugin's hook, or `clodfarm attach`'s).
+
+    The session and its new turns go in the farm's store as a ``guest`` session of that computer, kept under the farm
+    Claude whose person connected it: it is that Claude working from its person's computer. So it shows on the farm
+    while a turn runs, its tokens count for that Claude, it takes that Claude's messages as well as the computer's, and
+    the answer carries that Claude's tool settings for the computer to apply. A computer only ever writes its own
+    sessions: a session id the farm already holds for anyone else is refused.
+
+    ``Listen`` waits up to LISTEN_MAX seconds for a message and says how many wait, taking none; ``Wake`` then takes
+    them (an idle session's listener, which wakes the session with them)."""
+    from . import policy
     from .prompts import mail_text
-    name = grant["name"]
+    name, owner = grant["name"], grant.get("owner")
     sid, event = str(body.get("session") or ""), str(body.get("event") or "")
     if not SID_RE.match(sid) or event not in GUEST_EVENTS:
         return 400, {"error": "session (its Claude Code session id) and event are required"}
     try:
-        turns = _guest_turns(body.get("turns") or [])
+        turns, usage = _guest_turns(body.get("turns") or []), _guest_usage(body.get("usage"))
     except ValueError as e:
         return 400, {"error": str(e)}
     had = store.session(sid)
     if had and (had.get("kind") != "guest" or had.get("runs_on") != name):
         return 403, {"error": "that session isn't this computer's"}
+    addrs = addresses(grant)
+    if event == "Listen":
+        end = time.time() + max(0, min(LISTEN_MAX, int(body.get("wait") or 0)))
+        while True:
+            n = sum(len(store.unread(a)) for a in addrs)
+            if n or time.time() >= end:
+                return 200, {"ok": True, "waiting": n}
+            time.sleep(1)
     ended = event in ("SessionEnd", "Disconnect")
-    title = str(body.get("title") or "")[:120] or None
-    store.record_session(sid, turns=turns, claude=grant.get("owner") or name, runs_on=name, kind="guest", box=name,
-                         cwd=str(body.get("cwd") or "")[:500] or None, title=title,
-                         busy=True if event == "UserPromptSubmit" else False if event in ("Stop", "SessionEnd") else None,
-                         ended=True if ended else False if event in ("SessionStart", "Connect") else None,
-                         end_reason=str(body.get("reason") or event)[:80] if ended else None)
-    if not had:
-        store.event("session.guest", f"{name} connected a Claude Code session to the farm", by=name)
-    mail = store.claim(name, f"{event.lower()}:{name}") if body.get("mail") and not ended else []
-    return 200, {"ok": True, "session": sid, "name": name, "turns": len(turns), "mail": mail_text(mail) if mail else ""}
+    if event != "Wake":
+        title = str(body.get("title") or "")[:120] or None
+        store.record_session(sid, turns=turns, claude=owner or name, runs_on=name, kind="guest", box=name,
+                             cwd=str(body.get("cwd") or "")[:500] or None, title=title,
+                             busy=True if event in ("UserPromptSubmit", "PostToolBatch") else
+                             False if event in ("Stop", "SessionEnd", "Disconnect") else None,
+                             ended=True if ended else False if event in ("SessionStart", "Connect") else None,
+                             end_reason=str(body.get("reason") or event)[:80] if ended else None)
+        if not had:
+            store.event("session.guest", f"{name} connected a Claude Code session to the farm", by=name)
+        if usage and owner:
+            store.add_tokens(usage, owner)
+    mail = [m for a in addrs for m in store.claim(a, f"{event.lower()}:{name}")] \
+        if body.get("mail") and not ended else []
+    return 200, {"ok": True, "session": sid, "name": name, "as": owner or name, "turns": len(turns),
+                 "policy": policy.clean(store.claude(owner).get("tools")) if owner else {"deny": []},
+                 "mail": mail_text(sorted(mail, key=lambda m: float(m.get("at", 0)))) if mail else ""}
 
 
 # =================================================================== HTTP glue

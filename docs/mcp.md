@@ -36,13 +36,21 @@ A connection can never:
 - log Claudes in or out, release them, or pause the farm (those stay in the farm UI);
 - read credentials.
 
-Your computer is a **guest** on the farm, not a Claude, so it adds no budget and uses none. Its sub-agents run on the farm's Claudes, under the budget governor like any other. They show on the farm's own Claude's plot, marked `(for <name>)`. A farm Claude answers you with `clodfarm msg <name> "..."`, and you read the answer with `farm_inbox`.
+A connection **acts as the Claude of the person who approved it**: your Claude, working from your computer. Messages it sends come from that Claude, the sub-agents, schedules and dashboards it starts are that Claude's, and `farm_inbox` reads that Claude's messages as well as the computer's own (`clodfarm msg <computer name>`). It adds no budget and uses none: its sub-agents run on the farm's Claudes, under the budget governor like any other. (A connection made before this release doesn't know whose it is, and stays a guest under its own name: connect again to change that.)
 
 ## Put your computer's sessions on the farm (the `farm` plugin)
 
 The MCP connection lets your Claude Code *use* the farm. The `farm` plugin also puts your computer's own Claude Code
-sessions *on* it: each one shows under your Claude on the farm as a **LOCAL** session, with its conversation, next to
-the farm's own, and messages the farm's Claudes send your computer arrive in the session itself.
+sessions *on* it, as your Claude working from your computer, like one more of its conversations on the farm:
+- **it shows**: your Claude walks to work on the farm with a TALKING bubble while one of its turns runs, and the session
+  is under your Claude as a **LOCAL** session, its conversation updated as it goes;
+- **it has the farm's tools**: the plugin's MCP server hands it the farm's own (`farm_status`, `farm_spawn`,
+  `farm_msg`, `farm_inbox`, schedules, dashboards) over the same connection, acting as your Claude, and the session is
+  told it is on the farm;
+- **it is your Claude**: messages for your Claude reach it (as well as messages for the computer), its tokens count
+  in your Claude's tally, and what your Claude's person turned off in its SETTINGS is turned off there too;
+- **it is woken**: a message that arrives while it's idle starts a turn with it, for 10 minutes after its last turn,
+  as on the farm.
 
 Install it from a terminal (or with `/plugin` in Claude Code's terminal app; the VS Code extension has no `/plugin`):
 
@@ -90,23 +98,28 @@ shaped like a key, a token, an email address or a card number). A session that i
 Turning a session on sends its conversation so far; turning it off and on again keeps what was said in between on
 your computer.
 
-**What it doesn't change.** The session still runs on your computer, on your own Claude account: the farm's budget
-governor doesn't pace it, and it counts for no one's budget. A farm that is down or slow costs a session a few seconds
-at most; what couldn't be sent waits in `~/.config/clodfarm` and goes with the next report.
+**What it doesn't change.** The session still runs on your computer, on your own Claude account and your own Claude
+Code settings: the farm's budget governor doesn't pace it (its tokens are counted, not limited). A farm that is down or
+slow costs a session a few seconds at most; what couldn't be sent waits in `~/.config/clodfarm` and goes with the next
+report.
 
 **For clodfarm's own developers:** the plugin (`plugins/farm`, listed in `.claude-plugin/marketplace.json`) carries a
-copy of `clodfarm/attach.py`, `sessions.py` and `scrub.py`, since an installed plugin can't reach outside its folder.
+copy of `clodfarm/attach.py`, `sessions.py`, `scrub.py` and `policy.py` (and its `hooks.json` is made from
+`attach.hook_spec`), since an installed plugin can't reach outside its folder.
 Run `scripts/sync-plugin.sh` after changing them (the tests fail while the copy differs), and bump the version in
 `plugins/farm/.claude-plugin/plugin.json` with every change to the plugin: installed copies update only when it
 changes. That code must run on Python 3.9.
 
-**Messages.** The farm's Claudes reach your computer with `clodfarm msg <its name> "..."`, as before. In an attached
-session the message arrives at your next prompt, or before Claude ends its turn. Unlike a Remote Control
-conversation, an idle terminal session isn't woken for it.
+**Messages.** A message for your Claude, or for the computer (`clodfarm msg <computer name>`), goes to whichever of
+your Claude's conversations takes it first, on the farm or on your computer: at a prompt, before a turn ends, or by
+waking an idle one. Like a message from another Claude on the farm, it is a request, not your instruction.
 
-Under the hood: the hook (`clodfarm hook --guest`) posts to the farm's `/mcp/hook` with the connection's token
-(refreshed under a lock, since refresh tokens rotate). The farm records the session as kind `guest`, `runs_on` your
-computer's name, under the Claude whose person approved the connection. A computer can only write its own sessions.
+Under the hood: the hook posts to the farm's `/mcp/hook` with the connection's token (refreshed under a lock, since
+refresh tokens rotate). The farm records the session as kind `guest`, `runs_on` your computer's name, under the Claude
+whose person approved the connection, and answers with that Claude's messages and tool settings. A computer can only
+write its own sessions. After a turn an async hook asks `/mcp/hook` to `Listen` (it waits up to 20 s there and takes
+nothing), and takes the messages (`Wake`) only when it is sure to hand them over; a new turn or the session's end stops
+it at once. Before each tool call a hook checks the settings only while something is turned off (`policy.json`).
 
 ## How it's secured
 
@@ -120,7 +133,8 @@ computer's name, under the Claude whose person approved the connection. A comput
   - it runs under a strict CSP;
   - it shares the UI's login lockout (5 wrong passwords in 5 minutes).
 
-  A connection's name can't be a farm Claude's name, so a guest can never read a Claude's messages.
+  A connection's name can't be a farm Claude's name. A connection reads only its own messages and those of the Claude
+  whose person approved it (signed in as that Claude's person), never another Claude's.
 - **Tokens:**
   - access tokens last an hour and are bound to this farm's `/mcp` URL (RFC 8707);
   - refresh tokens last 30 days and **rotate**: using an old refresh token again ends the whole connection, since that means it was copied;

@@ -1,5 +1,5 @@
 {
-  "description": "Reports a connected session to the farm and hands it the farm's messages; takes /farm",
+  "description": "Reports a connected session to the farm, applies its Claude's tool settings, wakes it for the farm's messages, and takes /farm:<command>",
   "hooks": {
     "SessionStart": [
       {
@@ -23,6 +23,29 @@
         ]
       }
     ],
+    "PreToolUse": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -s \"${CLODFARM_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/clodfarm}/policy.json\" ] || exit 0; exec python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/farm.py\"",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PostToolBatch": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/farm.py\"",
+            "timeout": 15,
+            "async": true
+          }
+        ]
+      }
+    ],
     "Stop": [
       {
         "hooks": [
@@ -30,6 +53,17 @@
             "type": "command",
             "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/farm.py\"",
             "timeout": 15
+          }
+        ]
+      },
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "python3 \"${CLAUDE_PLUGIN_ROOT}/hooks/farm.py\" --listen",
+            "timeout": 600,
+            "async": true,
+            "asyncRewake": true
           }
         ]
       }
